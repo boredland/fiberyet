@@ -1,5 +1,5 @@
-# One-off: do the providers' checkers answer GitHub-hosted runner IPs at all?
-# Four requests per provider at most. Prints provider, status, detail only.
+# One-off: do the providers' checkers answer these runner IPs, directly and through the fetch-proxy?
+# Two requests per address and path. Prints provider, status, detail only.
 name: probe
 
 on:
@@ -9,17 +9,36 @@ jobs:
   probe:
     runs-on: ${{ fromJSON(vars.RUNS_ON || '["ubuntu-24.04"]') }}
     timeout-minutes: 10
-    env:
-      FIBERYET_PROXY: ${{ vars.FIBERYET_PROXY }}
-      FETCH_PROXY_URL: ${{ secrets.FETCH_PROXY_URL }}
-      FETCH_PROXY_TOKEN: ${{ secrets.FETCH_PROXY_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
       - run: uv sync --frozen
-      - name: Telekom, fiber expected
-        run: uv run fiberyet probe --provider telekom --street "Römerberg" --number 23
-      - name: Telekom, no fiber expected
-        run: uv run fiberyet probe --provider telekom --street "Alt-Heddernheim" --number 30
+      # exit 3 is a block: report it and carry on so the other path still runs.
+      - name: Direct, fiber expected
+        env:
+          FIBERYET_PROXY: ""
+        run: |
+          uv run fiberyet probe --provider telekom --street "Römerberg" --number 23 || echo "direct exit $?"
+      - name: Direct, no fiber expected
+        env:
+          FIBERYET_PROXY: ""
+        run: |
+          uv run fiberyet probe --provider telekom --street "Alt-Heddernheim" --number 30 || echo "direct exit $?"
+      - name: Via proxy, fiber expected
+        if: vars.FIBERYET_PROXY == 'plain'
+        env:
+          FIBERYET_PROXY: ${{ vars.FIBERYET_PROXY }}
+          FETCH_PROXY_URL: ${{ secrets.FETCH_PROXY_URL }}
+          FETCH_PROXY_TOKEN: ${{ secrets.FETCH_PROXY_TOKEN }}
+        run: |
+          uv run fiberyet probe --provider telekom --street "Römerberg" --number 23 || echo "proxy exit $?"
+      - name: Via proxy, no fiber expected
+        if: vars.FIBERYET_PROXY == 'plain'
+        env:
+          FIBERYET_PROXY: ${{ vars.FIBERYET_PROXY }}
+          FETCH_PROXY_URL: ${{ secrets.FETCH_PROXY_URL }}
+          FETCH_PROXY_TOKEN: ${{ secrets.FETCH_PROXY_TOKEN }}
+        run: |
+          uv run fiberyet probe --provider telekom --street "Alt-Heddernheim" --number 30 || echo "proxy exit $?"
