@@ -24,13 +24,23 @@ def data_dir_with_polygons(tmp_path):
     return tmp_path
 
 
+def data_dir_with_holed_polygon(tmp_path):
+    frame = tmp_path / "frame" / "polygons"
+    frame.mkdir(parents=True)
+    outer = [[BASE_X - 30, BASE_Y - 20], [BASE_X + 30, BASE_Y - 20], [BASE_X + 30, BASE_Y + 20], [BASE_X - 30, BASE_Y + 20], [BASE_X - 30, BASE_Y - 20]]
+    hole = [[BASE_X - 10, BASE_Y - 5], [BASE_X + 10, BASE_Y - 5], [BASE_X + 10, BASE_Y + 5], [BASE_X - 10, BASE_Y + 5], [BASE_X - 10, BASE_Y - 5]]
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": [outer, hole]}}]}
+    (frame / "fiber.geojson").write_text(json.dumps(fc))
+    (frame / "VERSION").write_text("2026-11-23T00:00:00Z\n")
+    return tmp_path
+
+
 def con_for_polygons(tmp_path):
     con = make_con([("a0", 10.0, 10.0, "D"), ("a1", 20.0, 20.0, "D"),
                     ("b0", 200.0, 200.0, "D"), ("b1", 210.0, 210.0, "D")])
-    # a0 inside the box, a1 just outside but same cell -> boundary cell
     con.execute("UPDATE address SET lon=?, lat=? WHERE id='a0'", (BASE_LON, BASE_LAT))
     con.execute("UPDATE address SET lon=?, lat=? WHERE id='a1'", (BASE_LON + 0.001, BASE_LAT))
-    # b0, b1 outside the box -> uniform cell
     con.execute("UPDATE address SET lon=?, lat=? WHERE id='b0'", (BASE_LON + 0.01, BASE_LAT + 0.01))
     con.execute("UPDATE address SET lon=?, lat=? WHERE id='b1'", (BASE_LON + 0.02, BASE_LAT + 0.01))
     return con
@@ -50,7 +60,7 @@ def test_coarse_orders_mixed_cells_before_uniform_cells(tmp_path):
     data_dir = data_dir_with_polygons(tmp_path)
     assert sampling.coarse(con, "p", data_dir=data_dir) == 2
     rows = list(con.execute("SELECT address_id FROM measurement ORDER BY rowid"))
-    assert rows[0]["address_id"] in {"a0", "a1"}  # boundary cell first
+    assert rows[0]["address_id"] in {"a0", "a1"}
     assert rows[1]["address_id"] in {"b0", "b1"}
 
 
@@ -61,12 +71,24 @@ def test_coarse_without_polygons_keeps_the_old_behaviour(tmp_path):
 
 def test_export_adds_a_polygon_layer_with_a_version(tmp_path):
     data_dir = data_dir_with_polygons(tmp_path)
-    pass
     layer = export.build_polygons(data_dir)
     assert layer["version"] == "2026-11-23T00:00:00Z"
     assert len(layer["features"]) == 1
+    assert layer["features"][0]["geometry"]["type"] in ("Polygon", "MultiPolygon")
     export.write(tmp_path / "dist", {"features": []}, {"features": []}, {}, layer)
     assert (tmp_path / "dist" / "polygons.geojson").exists()
+
+
+def test_holed_polygon_preserves_hole_and_hint(tmp_path):
+    data_dir = data_dir_with_holed_polygon(tmp_path)
+    layer = export.build_polygons(data_dir)
+    geom = layer["features"][0]["geometry"]
+    assert len(geom["coordinates"]) == 2  # outer + hole
+    # a point inside the hole should not be hinted
+    con = make_con([("h0", 0.0, 0.0, "D")])
+    con.execute("UPDATE address SET lon=?, lat=? WHERE id='h0'", (BASE_LON, BASE_LAT))
+    hints = polygon.polygon_hints(con, data_dir)
+    assert hints["h0"] is False
 
 
 def test_measured_statuses_are_not_overwritten_by_the_hint(tmp_path):
