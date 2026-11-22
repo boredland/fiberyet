@@ -102,9 +102,13 @@ def requeue_stale(con: sqlite3.Connection, provider: str, now: dt.datetime) -> i
     """Re-measure what may have changed, oldest first, within a daily quota.
 
     A `yes` is never asked again: fiber that is orderable does not go away. A `no` is rechecked after
-    RECHECK_NO_AFTER_DAYS, because a rollout can turn it into a `yes`. Rows that were unmatched or
-    errored are retried only after RETRY_AFTER_DAYS, so a duplicate address or a malformed house
-    number is not asked again every slice.
+    RECHECK_NO_AFTER_DAYS, because a rollout can turn it into a `yes`. An `error` (a transient 4xx or
+    5xx) is retried after RETRY_AFTER_DAYS.
+
+    An `unmatched` row is not retried here, except in the hold-out: sampling.retry_unmatched already
+    swaps in a different address for the same cell, so asking a permanently unmatched address again
+    (a range like 109-111) would repeat itself every month. A hold-out address cannot be swapped
+    without biasing the sample, so an unmatched one is retried.
     """
     today = now.strftime("%Y-%m-%d")
     used = con.execute(
@@ -119,9 +123,11 @@ def requeue_stale(con: sqlite3.Connection, provider: str, now: dt.datetime) -> i
         r[0]
         for r in con.execute(
             "SELECT address_id FROM measurement WHERE provider = ? AND measured_at IS NOT NULL AND ("
-            " (status = 'no' AND measured_at < ?) OR (status IN ('unmatched','error') AND measured_at < ?))"
+            " (status = 'no' AND measured_at < ?)"
+            " OR (status = 'error' AND measured_at < ?)"
+            " OR (status = 'unmatched' AND stage = 'holdout' AND measured_at < ?))"
             " ORDER BY (stage = 'holdout') DESC, measured_at, address_id LIMIT ?",
-            (provider, no_cutoff, retry_cutoff, quota),
+            (provider, no_cutoff, retry_cutoff, retry_cutoff, quota),
         )
     ]
     with con:

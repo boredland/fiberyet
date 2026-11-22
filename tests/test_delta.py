@@ -147,17 +147,52 @@ def test_sigterm_finishes_the_row_in_flight_then_stops_and_saves(tmp_path):
     assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL  # the handler was restored
 
 
-def test_yes_is_permanent_no_rechecks_at_90_days_unmatched_and_error_at_30(tmp_path):
-    con = make_con([(f"a{i}", float(i), 0.0, "D") for i in range(8)])
-    for name, status, days in [("a0", "unmatched", 29), ("a1", "unmatched", 31), ("a2", "error", 31),
-                               ("a3", "yes", 31), ("a4", "yes", 400), ("a5", "no", 89), ("a6", "no", 91),
-                               ("a7", "yes", 3650)]:
-        put(con, name, "p", "coarse", status)
+def _seed(con, rows):
+    for name, stage, status, days in rows:
+        put(con, name, "p", stage, status)
         stamp = (T0 - dt.timedelta(days=days)).strftime(advance.TS)
         con.execute("UPDATE measurement SET measured_at = ? WHERE address_id = ?", (stamp, name))
     con.commit()
+
+
+def _pending(con):
+    return {r[0] for r in con.execute("SELECT address_id FROM measurement WHERE status = 'pending'")}
+
+
+def test_yes_is_permanent_however_old(tmp_path):
+    con = make_con([(f"a{i}", float(i) * 500, 0.0, "D") for i in range(4)])
+    _seed(con, [("a0", "coarse", "yes", 31), ("a1", "coarse", "yes", 400), ("a2", "holdout", "yes", 3650),
+                ("a3", "coarse", "yes", 200)])
+    assert advance.requeue_stale(con, "p", T0) == 0
+    assert {r[0] for r in con.execute("SELECT address_id FROM measurement WHERE status = 'yes'")} == {
+        "a0", "a1", "a2", "a3"}
+
+
+def test_no_is_rechecked_at_90_days_and_error_at_30(tmp_path):
+    con = make_con([(f"a{i}", float(i) * 500, 0.0, "D") for i in range(5)])
+    _seed(con, [("a0", "coarse", "no", 89), ("a1", "coarse", "no", 91), ("a2", "coarse", "error", 29),
+                ("a3", "coarse", "error", 31), ("a4", "holdout", "no", 91)])
     assert advance.requeue_stale(con, "p", T0) == 3
-    pending = {r[0] for r in con.execute("SELECT address_id FROM measurement WHERE status = 'pending'")}
-    assert pending == {"a1", "a2", "a6"}
-    still_yes = {r[0] for r in con.execute("SELECT address_id FROM measurement WHERE status = 'yes'")}
-    assert still_yes == {"a3", "a4", "a7"}  # however old, a yes is kept and not re-fetched
+    assert _pending(con) == {"a1", "a3", "a4"}
+
+
+def test_an_unmatched_coarse_address_is_never_requeued_its_cell_gets_a_substitute(tmp_path):
+    # 109-111 style address: unmatched for good. retry_unmatched swaps in another address of the same cell;
+    # requeue_stale must not also ask the unmatched one again every month.
+    con = make_con([("u", 0.0, 0.0, "D"), ("sub", 5.0, 0.0, "D")])
+    _seed(con, [("u", "coarse", "unmatched", 400)])
+    assert advance.requeue_stale(con, "p", T0) == 0
+    assert _pending(con) == set()
+    from fiberyet import sampling
+
+    assert sampling.retry_unmatched(con, "p") == 1  # the substitute is the one that gets asked
+    assert _pending(con) == {"sub"}
+    put(con, "sub", "p", "coarse", "yes")
+    assert advance.requeue_stale(con, "p", T0) == 0 and "u" not in _pending(con)
+
+
+def test_an_unmatched_holdout_address_is_retried_after_30_days(tmp_path):
+    con = make_con([("h", 0.0, 0.0, "D"), ("h2", 900.0, 0.0, "D")])
+    _seed(con, [("h", "holdout", "unmatched", 31), ("h2", "holdout", "unmatched", 29)])
+    assert advance.requeue_stale(con, "p", T0) == 1
+    assert _pending(con) == {"h"}
