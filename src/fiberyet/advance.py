@@ -167,6 +167,35 @@ def _record_block(state: dict, status: int, now: dt.datetime) -> None:
     state["pause_s"] = BLOCK_PAUSE_S
 
 
+@contextlib.contextmanager
+def _stop_on_signals(request: dict) -> Iterator[None]:
+    """SIGTERM/SIGINT ask for a clean stop: the row in flight finishes, nothing new starts."""
+    previous: dict[int, object] = {}
+
+    def handler(signum: int, frame: object) -> None:
+        request.setdefault("reason", signal.Signals(signum).name.lower())
+
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            previous[sig] = signal.signal(sig, handler)
+    except ValueError:  # not the main thread: no handlers, the budget still bounds the run
+        previous = {}
+    try:
+        yield
+    finally:
+        for sig, old in previous.items():
+            signal.signal(sig, old)
+
+
+def commit_message(provider: str, outcome: str, counts: Counter, pending: int, phases: list[str]) -> str:
+    """A title with the counts, then the same numbers as a JSON block (the trinkhallen commit style)."""
+    total = sum(counts.values())
+    parts = ", ".join(f"{k} {counts[k]}" for k in ("yes", "no", "unmatched", "error") if counts[k])
+    title = f"data: {provider} {outcome} +{total}" + (f" ({parts})" if parts else "") + f", {pending} pending"
+    stats = {"provider": provider, "outcome": outcome, "measured": dict(counts), "pending": pending, "phases": phases}
+    return f"{title}\n\n```json\n{json.dumps(stats, sort_keys=True)}\n```"
+
+
 def advance(
     con: sqlite3.Connection,
     data_dir: Path,
