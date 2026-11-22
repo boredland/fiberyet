@@ -147,14 +147,17 @@ def test_sigterm_finishes_the_row_in_flight_then_stops_and_saves(tmp_path):
     assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL  # the handler was restored
 
 
-def test_unmatched_and_error_rows_wait_30_days_but_answers_wait_90(tmp_path):
-    con = make_con([(f"a{i}", float(i), 0.0, "D") for i in range(6)])
+def test_yes_is_permanent_no_rechecks_at_90_days_unmatched_and_error_at_30(tmp_path):
+    con = make_con([(f"a{i}", float(i), 0.0, "D") for i in range(8)])
     for name, status, days in [("a0", "unmatched", 29), ("a1", "unmatched", 31), ("a2", "error", 31),
-                               ("a3", "yes", 31), ("a4", "yes", 91), ("a5", "no", 91)]:
+                               ("a3", "yes", 31), ("a4", "yes", 400), ("a5", "no", 89), ("a6", "no", 91),
+                               ("a7", "yes", 3650)]:
         put(con, name, "p", "coarse", status)
         stamp = (T0 - dt.timedelta(days=days)).strftime(advance.TS)
         con.execute("UPDATE measurement SET measured_at = ? WHERE address_id = ?", (stamp, name))
     con.commit()
-    assert advance.requeue_stale(con, "p", T0) == 4
+    assert advance.requeue_stale(con, "p", T0) == 3
     pending = {r[0] for r in con.execute("SELECT address_id FROM measurement WHERE status = 'pending'")}
-    assert pending == {"a1", "a2", "a4", "a5"}
+    assert pending == {"a1", "a2", "a6"}
+    still_yes = {r[0] for r in con.execute("SELECT address_id FROM measurement WHERE status = 'yes'")}
+    assert still_yes == {"a3", "a4", "a7"}  # however old, a yes is kept and not re-fetched

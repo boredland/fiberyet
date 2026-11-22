@@ -200,19 +200,31 @@ def test_logs_never_contain_addresses_or_urls(tmp_path):
     assert "://" not in text and "Gärtner" not in text and "id0" not in text
 
 
-def test_refresh_requeues_old_rows_within_daily_quota(tmp_path):
+def test_refresh_requeues_old_no_rows_and_stops_at_the_daily_quota(tmp_path, monkeypatch):
     con = world(tmp_path, n=300)
     old = (T0 - dt.timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
     for i in range(300):
-        put(con, f"id{i:05d}", "p", "coarse", "yes")
+        put(con, f"id{i:05d}", "p", "coarse", "no")
         con.execute("UPDATE measurement SET measured_at = ? WHERE address_id = ?", (old, f"id{i:05d}"))
-    assert advance.requeue_stale(con, "p", T0) == 300
-    assert con.execute("SELECT COUNT(*) FROM measurement WHERE status = 'pending'").fetchone()[0] == 300
-    # a row measured today counts against the quota
-    quota_left = advance.REFRESH_DAILY_QUOTA
-    con.execute("UPDATE measurement SET status='yes', measured_at=?", (T0.strftime("%Y-%m-%dT%H:%M:%SZ"),))
+    monkeypatch.setattr(advance, "REFRESH_DAILY_QUOTA", 120)
+    assert advance.requeue_stale(con, "p", T0) == 120  # the quota caps one day's re-measuring
+    assert con.execute("SELECT COUNT(*) FROM measurement WHERE status = 'pending'").fetchone()[0] == 120
+
+
+def test_rows_measured_today_use_up_the_daily_quota(tmp_path, monkeypatch):
+    con = world(tmp_path, n=300)
+    today = T0.strftime("%Y-%m-%dT%H:%M:%SZ")
+    old = (T0 - dt.timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for i in range(50):
+        put(con, f"id{i:05d}", "p", "coarse", "no")
+        con.execute("UPDATE measurement SET measured_at = ? WHERE address_id = ?", (today, f"id{i:05d}"))
+    for i in range(50, 100):
+        put(con, f"id{i:05d}", "p", "coarse", "no")
+        con.execute("UPDATE measurement SET measured_at = ? WHERE address_id = ?", (old, f"id{i:05d}"))
+    monkeypatch.setattr(advance, "REFRESH_DAILY_QUOTA", 60)
+    assert advance.requeue_stale(con, "p", T0) == 10  # 60 allowed, 50 already spent today
+    monkeypatch.setattr(advance, "REFRESH_DAILY_QUOTA", 50)
     assert advance.requeue_stale(con, "p", T0) == 0
-    assert quota_left == 2000
 
 
 def test_idle_when_everything_is_fresh_and_nothing_to_plan(tmp_path):

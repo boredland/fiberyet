@@ -25,7 +25,7 @@ from . import infer, sampling, store
 from .fetch import Blocked, Unavailable
 
 TS = "%Y-%m-%dT%H:%M:%SZ"
-REFRESH_AFTER_DAYS = 90
+RECHECK_NO_AFTER_DAYS = 90
 REFRESH_DAILY_QUOTA = 2000
 DEADLINE_MARGIN_S = 60.0
 BLOCK_PAUSE_HOURS = 24
@@ -99,11 +99,12 @@ def crawl_pending(
 
 
 def requeue_stale(con: sqlite3.Connection, provider: str, now: dt.datetime) -> int:
-    """Re-measure what has expired, oldest first, within a daily quota.
+    """Re-measure what may have changed, oldest first, within a daily quota.
 
-    Answers (yes/no) expire after REFRESH_AFTER_DAYS because rollouts change them. Rows that were
-    unmatched or errored are retried only after RETRY_AFTER_DAYS, so a duplicate address or a
-    malformed house number is not asked again every slice.
+    A `yes` is never asked again: fiber that is orderable does not go away. A `no` is rechecked after
+    RECHECK_NO_AFTER_DAYS, because a rollout can turn it into a `yes`. Rows that were unmatched or
+    errored are retried only after RETRY_AFTER_DAYS, so a duplicate address or a malformed house
+    number is not asked again every slice.
     """
     today = now.strftime("%Y-%m-%d")
     used = con.execute(
@@ -112,15 +113,15 @@ def requeue_stale(con: sqlite3.Connection, provider: str, now: dt.datetime) -> i
     quota = REFRESH_DAILY_QUOTA - used
     if quota <= 0:
         return 0
-    answer_cutoff = (now - dt.timedelta(days=REFRESH_AFTER_DAYS)).strftime(TS)
+    no_cutoff = (now - dt.timedelta(days=RECHECK_NO_AFTER_DAYS)).strftime(TS)
     retry_cutoff = (now - dt.timedelta(days=RETRY_AFTER_DAYS)).strftime(TS)
     ids = [
         r[0]
         for r in con.execute(
             "SELECT address_id FROM measurement WHERE provider = ? AND measured_at IS NOT NULL AND ("
-            " (status IN ('yes','no') AND measured_at < ?) OR (status IN ('unmatched','error') AND measured_at < ?))"
+            " (status = 'no' AND measured_at < ?) OR (status IN ('unmatched','error') AND measured_at < ?))"
             " ORDER BY (stage = 'holdout') DESC, measured_at, address_id LIMIT ?",
-            (provider, answer_cutoff, retry_cutoff, quota),
+            (provider, no_cutoff, retry_cutoff, quota),
         )
     ]
     with con:
