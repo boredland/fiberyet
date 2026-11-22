@@ -1,0 +1,12 @@
+{
+ "blocks": [
+  {
+   "at": "2026-11-22T16:32:36Z",
+   "status": 403
+  }
+ ],
+ "disabled": false,
+ "pause_s": 10.0,
+ "pause_until": "2026-11-23T16:32:36Z",
+ "streak": 1
+}
