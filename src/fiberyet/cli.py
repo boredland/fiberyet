@@ -129,7 +129,8 @@ def run_export(args, con) -> None:
     districts = export.build_districts(con, states, polygons)
     version = (args.data_dir / "frame" / "VERSION").read_text().strip()
     stamp = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    export.write(args.out, cells, districts, export.build_summary(con, list(PROVIDERS), stamp, version))
+    poly_layer = export.build_polygons(args.data_dir, con)
+    export.write(args.out, cells, districts, export.build_summary(con, list(PROVIDERS), stamp, version), poly_layer)
     print(f"{len(cells['features'])} cells, {len(districts['features'])} districts")
 
 

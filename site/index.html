@@ -13,11 +13,12 @@
     <h1>Glasfaser in Frankfurt</h1>
     <p class="note">Zeigt den technischen Stand laut Anbieter-Check. Keine Zusage für ein einzelnes Gebäude.</p>
     <fieldset id="views">
-      <legend>Anbieter</legend>
+      <legend>Datenstand</legend>
       <label><input type="radio" name="view" value="a" checked> Alle Netze</label>
       <label><input type="radio" name="view" value="t"> Telekom</label>
       <label><input type="radio" name="view" value="e"> 1&amp;1</label>
       <label><input type="radio" name="view" value="g"> TNG</label>
+      <label><input type="radio" name="view" value="p"> Telekom-Polygone (Hinweis)</label>
     </fieldset>
     <div id="legend" aria-label="Legende">
       <span><i style="background:#f1eef6"></i>0&nbsp;%</span>
@@ -27,6 +28,7 @@
       <span><i style="background:#045a8d"></i>90–100&nbsp;%</span>
       <span><i style="background:#cccccc"></i>überwiegend unbekannt</span>
       <span><i style="background:#eeeeee;border:1px solid #bbb"></i>zu wenige Adressen</span>
+      <span><i style="background:#66bd6d"></i>Telekom-Polygon (nur Hinweis)</span>
     </div>
     <p id="phase"></p>
     <h2>Stadtteile</h2>
@@ -34,6 +36,7 @@
     <p id="stats"></p>
     <p class="attribution">
       Messungen: eigene Abfragen der Verfügbarkeitsprüfungen der Anbieter.
+      Polygon-Hinweis: Telekom-Ausbaukarte (technischer Ausbaustand, keine Bestellzusage).
       Adressen: HVBG Hessen (dl-de/zero-2.0).
       Gebietsgrenzen: Stadt Frankfurt am Main (dl-by-de/2.0), vereinfacht.
       Karte: OpenFreeMap, © OpenMapTiles, © OpenStreetMap-Mitwirkende.

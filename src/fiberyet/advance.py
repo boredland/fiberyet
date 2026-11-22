@@ -140,12 +140,13 @@ def requeue_stale(con: sqlite3.Connection, provider: str, now: dt.datetime) -> i
 
 
 def plan_next(
-    con: sqlite3.Connection, provider: str, districts: list[str] | None, now: dt.datetime
+    con: sqlite3.Connection, provider: str, districts: list[str] | None, now: dt.datetime,
+    data_dir: Path | None = None,
 ) -> tuple[str, int]:
     n = sampling.holdout_tasks(con, provider)
     if n:
         return "holdout", n
-    n = sampling.coarse(con, provider, districts)
+    n = sampling.coarse(con, provider, districts, data_dir=data_dir)
     if n:
         return "coarse", n
     n = sampling.retry_unmatched(con, provider, districts)
@@ -268,7 +269,7 @@ def advance(
                 counts.update(crawl_pending(con, provider, measure, should_stop=should_stop, on_row=on_row, now=now))
                 if should_stop():
                     break
-                phase, planned = plan_next(con, provider, districts, now())
+                phase, planned = plan_next(con, provider, districts, now(), data_dir=data_dir)
                 phases.append(f"{phase}+{planned}")
                 log(f"{provider}: planned {phase} +{planned}")
                 if phase == "idle":

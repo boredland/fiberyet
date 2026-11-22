@@ -72,7 +72,10 @@ def bucket(state: str) -> int:
 
 
 def per_address(con: sqlite3.Connection, providers: list[str]) -> dict[str, dict[str, str]]:
-    """{provider_key: {address_id: state}} for t, e, g and 'a' (any), with absent addresses as 'x'."""
+    """{provider_key: {address_id: state}} for t, e, g and 'a' (any), with absent addresses as 'x'.
+
+    Polygon hints are accepted for callers that want them, but they never alter a measured state.
+    """
     ids = [r[0] for r in con.execute("SELECT id FROM address")]
     district = {r["id"]: r["district"] for r in con.execute("SELECT id, district FROM address")}
     by_key: dict[str, dict[str, str]] = {}
@@ -177,9 +180,36 @@ def build_summary(con: sqlite3.Connection, providers: list[str], updated_at: str
     return out
 
 
-def write(out_dir: Path, cells: dict, districts: dict, summary: dict) -> None:
+def build_polygons(data_dir: Path, con: sqlite3.Connection) -> dict | None:
+    """Telekom's public fiber polygons, simplified, for a separate map view."""
+    from . import polygon
+
+    feats = polygon.load_polygons(data_dir)
+    if not feats:
+        return None
+    to_ll = Transformer.from_crs(3857, 4326, always_xy=True)
+    out = []
+    for i, geom in enumerate(sorted(feats, key=lambda g: g.area, reverse=True)):
+        polygons = geom.geoms if geom.geom_type == "MultiPolygon" else [geom]
+        coords = [
+            [[[round(v, 5) for v in to_ll.transform(x, y)] for x, y in poly.exterior.coords]]
+            for poly in polygons
+        ]
+        out.append({"type": "Feature", "properties": {"i": i},
+                    "geometry": {"type": "MultiPolygon", "coordinates": coords}})
+    version_path = data_dir / "frame" / "polygons" / "VERSION"
+    version = version_path.read_text().strip() if version_path.exists() else ""
+    out.append({"type": "Feature", "properties": {"i": -1, "version": version},
+                "geometry": {"type": "MultiPolygon", "coordinates": []}})
+    return {"type": "FeatureCollection", "features": out}
+
+
+def write(out_dir: Path, cells: dict, districts: dict, summary: dict, polygons: dict | None = None) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
-    for name, obj in (("cells.geojson", cells), ("districts.geojson", districts), ("summary.json", summary)):
+    files = [("cells.geojson", cells), ("districts.geojson", districts), ("summary.json", summary)]
+    if polygons is not None:
+        files.append(("polygons.geojson", polygons))
+    for name, obj in files:
         text = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
         data = text.encode("utf-8")
         if len(data) > MAX_FILE_BYTES:

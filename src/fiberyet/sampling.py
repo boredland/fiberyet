@@ -1,4 +1,8 @@
-"""What to measure next. All randomness is seeded so a rerun picks the same addresses."""
+"""What to measure next. All randomness is seeded so a rerun picks the same addresses.
+
+When fiber polygons are available, cells whose addresses disagree about being inside a polygon are
+measured first: those are the boundaries where the polygon hint is least reliable.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +10,9 @@ import math
 import random
 import sqlite3
 
+from pathlib import Path
+
+from . import polygon
 from .infer import neighbour_table, p_yes_at, state_of
 
 SEED = 20261122
@@ -50,8 +57,15 @@ def _scope(districts: list[str] | None) -> tuple[str, list[str]]:
     return f" AND district IN ({','.join('?' * len(districts))})", list(districts)
 
 
-def coarse(con: sqlite3.Connection, provider: str, districts: list[str] | None = None) -> int:
-    """One random non-hold-out address per 100 m cell that has none measured or pending yet."""
+def coarse(con: sqlite3.Connection, provider: str, districts: list[str] | None = None,
+           data_dir: Path | None = None) -> int:
+    """One address per 100 m cell, boundaries first when polygon hints are available.
+
+    A cell whose addresses split between inside and outside the fiber polygons is a boundary and is
+    planned before a uniform cell, because the polygon is least reliable there. Cells outside any
+    polygon are planned last: on the 1000-address hold-out the lookup found fiber in about a third
+    of those, so they are cheap to learn from if the boundary budget runs out.
+    """
     clause, args = _scope(districts)
     rng = random.Random(f"{SEED}:{provider}:coarse")
     done = {
@@ -64,8 +78,16 @@ def coarse(con: sqlite3.Connection, provider: str, districts: list[str] | None =
     by_cell: dict[str, list[str]] = {}
     for r in con.execute(f"SELECT id, cell FROM address WHERE holdout = 0{clause} ORDER BY id", args):
         by_cell.setdefault(r["cell"], []).append(r["id"])
-    ids = [rng.choice(members) for cell, members in sorted(by_cell.items()) if cell not in done]
-    return _insert(con, provider, "coarse", ids)
+    hints = polygon.polygon_hints(con, data_dir) if data_dir else {}
+    chosen: list[tuple[int, int, str]] = []
+    for cell, members in sorted(by_cell.items()):
+        if cell in done:
+            continue
+        inside = sum(1 for i in members if hints.get(i, False))
+        group = 0 if 0 < inside < len(members) else 1 if inside else 2
+        chosen.append((group, -len(members), rng.choice(members)))
+    chosen.sort()
+    return _insert(con, provider, "coarse", [id_ for _, _, id_ in chosen])
 
 
 def retry_unmatched(con: sqlite3.Connection, provider: str, districts: list[str] | None = None) -> int:
