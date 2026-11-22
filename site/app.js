@@ -5,7 +5,6 @@ setWorkerUrl(new URL('./vendor/maplibre-gl-worker.mjs', import.meta.url).href);
 const VIEWS = { a: 'Alle Netze', t: 'Telekom', e: '1&1', g: 'TNG', p: 'Telekom-Polygone' };
 const PROVIDER_OF_VIEW = { a: null, t: 'telekom', e: 'einsundeins', g: 'tng', p: null };
 const FRANKFURT = [[8.40, 49.98], [8.82, 50.26]];
-const VIEWPORT_PANEL_PX = 320;
 
 const hash = new URLSearchParams(location.hash.slice(1));
 let view = VIEWS[hash.get('v')] ? hash.get('v') : 'a';
@@ -24,8 +23,6 @@ const map = new Map({
 let cells, districts, summary, polygons;
 
 function flatten(data) {
-  // MapLibre expressions cannot index a list property per view, so copy the chosen view into flat keys.
-  // Numeric feature ids survive the round trip through the source; array properties do not.
   data.features.forEach((f, i) => {
     f.id = i;
     const p = f.properties;
@@ -47,7 +44,7 @@ function paint() {
   map.setLayoutProperty('cells-fill', 'visibility', showPolygons ? 'none' : 'visible');
   map.setLayoutProperty('districts-line', 'visibility', showPolygons ? 'none' : 'visible');
   map.setLayoutProperty('polygons-fill', 'visibility', showPolygons ? 'visible' : 'none');
-  if (!showPolygons) map.getSource('cells').setData(flatten(cells));
+  if (!showPolygons && cells) map.getSource('cells').setData(flatten(cells));
   renderDistricts();
   renderStats();
   writeHash('v', view);
@@ -66,7 +63,7 @@ function bboxOf(geom) {
 }
 
 function renderDistricts() {
-  if (view === 'p') {
+  if (view === 'p' || !districts) {
     document.getElementById('districts').replaceChildren();
     return;
   }
@@ -92,10 +89,10 @@ function renderStats() {
     const date = polygons && polygons.version ? polygons.version.slice(0, 10) : '';
     document.getElementById('stats').textContent =
       `Flächen, in denen die Telekom Glasfaser ausgebaut hat${date ? ' (Stand ' + date + ')' : ''}. ` +
-      'Ein Hinweis auf den technischen Ausbau, keine Bestellzusage und keine Messung an Ihrer Adresse. ' +
-      'Stichprobe: 95,3 % der bestellbaren Adressen liegen innerhalb dieser Flächen, aber auch 55 von 349 ohne bestellbares Glasfaser.';
+      'Ein Hinweis auf den technischen Ausbau, keine Bestellzusage und keine Messung an Ihrer Adresse.';
     return;
   }
+  if (!summary) return;
   const p = summary.providers[PROVIDER_OF_VIEW[view]] || null;
   const parts = [];
   if (p) {
@@ -123,9 +120,10 @@ map.on('load', async () => {
   const names = ['cells.geojson', 'districts.geojson', 'summary.json', 'polygons.geojson'];
   const vals = await Promise.all(names.map((n) => fetch(`./data/${n}`).then((r) => (r.ok ? r.json() : null))));
   [cells, districts, summary, polygons] = vals;
+  if (!polygons) polygons = { type: 'FeatureCollection', features: [] };
   map.addSource('cells', { type: 'geojson', data: flatten(cells) });
   map.addSource('districts', { type: 'geojson', data: districts });
-  map.addSource('polygons', { type: 'geojson', data: polygons || { type: 'FeatureCollection', features: [] } });
+  map.addSource('polygons', { type: 'geojson', data: polygons });
   map.addLayer({
     id: 'cells-fill', type: 'fill', source: 'cells',
     paint: {

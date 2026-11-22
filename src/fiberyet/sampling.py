@@ -78,14 +78,16 @@ def coarse(con: sqlite3.Connection, provider: str, districts: list[str] | None =
     by_cell: dict[str, list[str]] = {}
     for r in con.execute(f"SELECT id, cell FROM address WHERE holdout = 0{clause} ORDER BY id", args):
         by_cell.setdefault(r["cell"], []).append(r["id"])
-    hints = polygon.polygon_hints(con, data_dir) if data_dir else {}
+    todo = {cell: members for cell, members in by_cell.items() if cell not in done}
+    if not todo:
+        return 0
+    hints = polygon.polygon_hints_for(con, todo, data_dir) if data_dir else {}
     chosen: list[tuple[int, int, str]] = []
-    for cell, members in sorted(by_cell.items()):
-        if cell in done:
-            continue
+    for cell, members in sorted(todo.items()):
         inside = sum(1 for i in members if hints.get(i, False))
-        group = 0 if 0 < inside < len(members) else 1 if inside else 2
-        chosen.append((group, -len(members), rng.choice(members)))
+        group = 0 if (hints and 0 < inside < len(members)) else 1 if (hints and inside) else 2 if hints else 0
+        key = (group, -len(members) if hints else 0, rng.choice(members))
+        chosen.append((group, key[1], key[2]))
     chosen.sort()
     return _insert(con, provider, "coarse", [id_ for _, _, id_ in chosen])
 

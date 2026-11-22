@@ -1,5 +1,6 @@
-work/
+out/
 dist/
+work/
 node_modules/
 .venv/
 __pycache__/

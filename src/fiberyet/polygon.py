@@ -41,5 +41,22 @@ def hinted_addresses(con: sqlite3.Connection, polygons: list[shapely.Geometry]) 
     return out
 
 
+def polygon_hints_for(con: sqlite3.Connection, todo: dict[str, list[str]], data_dir: Path) -> dict[str, bool]:
+    """Hints only for addresses in the given cells."""
+    ids = {i for members in todo.values() for i in members}
+    polys = load_polygons(data_dir)
+    if not polys:
+        return {}
+    tree = STRtree(polys)
+    out = {}
+    for r in con.execute("SELECT id, lon, lat FROM address"):
+        if r["id"] not in ids:
+            continue
+        x, y = _TO_3857.transform(r["lon"], r["lat"])
+        p = shapely.Point(x, y)
+        out[r["id"]] = any(polys[i].contains(p) for i in tree.query(p))
+    return out
+
+
 def polygon_hints(con: sqlite3.Connection, data_dir: Path) -> dict[str, bool]:
     return hinted_addresses(con, load_polygons(data_dir))

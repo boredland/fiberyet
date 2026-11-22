@@ -180,8 +180,10 @@ def build_summary(con: sqlite3.Connection, providers: list[str], updated_at: str
     return out
 
 
-def build_polygons(data_dir: Path, con: sqlite3.Connection) -> dict | None:
-    """Telekom's public fiber polygons, simplified, for a separate map view."""
+def build_polygons(data_dir: Path) -> dict | None:
+    """Telekom's public fiber polygons, reprojected to WGS84, holes preserved."""
+    from shapely.ops import transform
+
     from . import polygon
 
     feats = polygon.load_polygons(data_dir)
@@ -189,19 +191,12 @@ def build_polygons(data_dir: Path, con: sqlite3.Connection) -> dict | None:
         return None
     to_ll = Transformer.from_crs(3857, 4326, always_xy=True)
     out = []
-    for i, geom in enumerate(sorted(feats, key=lambda g: g.area, reverse=True)):
-        polygons = geom.geoms if geom.geom_type == "MultiPolygon" else [geom]
-        coords = [
-            [[[round(v, 5) for v in to_ll.transform(x, y)] for x, y in poly.exterior.coords]]
-            for poly in polygons
-        ]
-        out.append({"type": "Feature", "properties": {"i": i},
-                    "geometry": {"type": "MultiPolygon", "coordinates": coords}})
+    for geom in sorted(feats, key=lambda g: g.area, reverse=True):
+        projected = transform(to_ll.transform, geom)
+        out.append({"type": "Feature", "properties": {}, "geometry": mapping(projected)})
     version_path = data_dir / "frame" / "polygons" / "VERSION"
     version = version_path.read_text().strip() if version_path.exists() else ""
-    out.append({"type": "Feature", "properties": {"i": -1, "version": version},
-                "geometry": {"type": "MultiPolygon", "coordinates": []}})
-    return {"type": "FeatureCollection", "features": out}
+    return {"type": "FeatureCollection", "version": version, "features": out}
 
 
 def write(out_dir: Path, cells: dict, districts: dict, summary: dict, polygons: dict | None = None) -> None:

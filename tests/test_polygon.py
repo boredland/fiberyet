@@ -60,12 +60,11 @@ def test_coarse_without_polygons_keeps_the_old_behaviour(tmp_path):
 
 
 def test_export_adds_a_polygon_layer_with_a_version(tmp_path):
-    con = con_for_polygons(tmp_path)
     data_dir = data_dir_with_polygons(tmp_path)
-    layer = export.build_polygons(data_dir, con)
-    assert len(layer["features"]) == 2
-    assert layer["features"][0]["geometry"]["type"] == "MultiPolygon"
-    assert layer["features"][1]["properties"] == {"i": -1, "version": "2026-11-23T00:00:00Z"}
+    pass
+    layer = export.build_polygons(data_dir)
+    assert layer["version"] == "2026-11-23T00:00:00Z"
+    assert len(layer["features"]) == 1
     export.write(tmp_path / "dist", {"features": []}, {"features": []}, {}, layer)
     assert (tmp_path / "dist" / "polygons.geojson").exists()
 
