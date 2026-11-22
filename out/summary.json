@@ -1,1 +1,0 @@
-{"updated_at":"2026-11-22T23:34:12Z","frame_version":"2026-11-22","addresses":90673,"providers":{"telekom":{"measured":957,"pending":8058,"last_measured":"2026-11-22T19:29:11Z","coverage":0.6337579617834395,"coverage_ci":[0.6025060501614353,0.6639233392839009],"error_rate":0.0,"error_ci":[0.0,0.6576280471103807],"uncertain_share":0.9978768577494692,"unmatched_share":0.058}}}
