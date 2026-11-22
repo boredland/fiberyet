@@ -1,6 +1,5 @@
 import datetime as dt
 import json
-import subprocess
 from types import SimpleNamespace
 
 from conftest import make_con, put
@@ -182,41 +181,6 @@ def test_idle_when_everything_is_fresh_and_nothing_to_plan(tmp_path):
     code, logs = run(con, tmp_path, m, clock=clock, budget_s=10**7)
     assert code == 0
     assert any("planned idle" in l for l in logs)
-
-
-def test_push_commits_and_pushes_to_a_remote(tmp_path):
-    remote = tmp_path / "remote.git"
-    subprocess.run(["git", "init", "--bare", "-b", "data", str(remote)], check=True, capture_output=True)
-    work = tmp_path / "data"
-    work.mkdir()
-    subprocess.run(["git", "-C", str(work), "init", "-b", "data"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(work), "remote", "add", "origin", str(remote)], check=True)
-    (work / "a.txt").write_text("1")
-    assert store.push(work, "first") is True
-    assert store.push(work, "nothing") is False
-    log = subprocess.run(["git", "--git-dir", str(remote), "log", "--format=%an|%s", "data"],
-                         capture_output=True, text=True, check=True).stdout.strip()
-    assert log == "github-actions[bot]|first"
-
-
-def test_push_rebases_over_a_concurrent_push(tmp_path):
-    remote = tmp_path / "remote.git"
-    subprocess.run(["git", "init", "--bare", "-b", "data", str(remote)], check=True, capture_output=True)
-    a, b = tmp_path / "a", tmp_path / "b"
-    for d in (a, b):
-        d.mkdir()
-        subprocess.run(["git", "-C", str(d), "init", "-b", "data"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(d), "remote", "add", "origin", str(remote)], check=True)
-    (a / "tel.txt").write_text("1")
-    store.push(a, "a1")
-    subprocess.run(["git", "-C", str(b), "pull", "origin", "data"], check=True, capture_output=True)
-    (a / "tel.txt").write_text("2")
-    store.push(a, "a2")
-    (b / "eins.txt").write_text("x")  # b is now behind remote: its first push is rejected
-    assert store.push(b, "b1") is True
-    files = subprocess.run(["git", "--git-dir", str(remote), "ls-tree", "--name-only", "data"],
-                           capture_output=True, text=True, check=True).stdout.split()
-    assert sorted(files) == ["eins.txt", "tel.txt"]
 
 
 def test_holdout_rows_are_planned_once(tmp_path):

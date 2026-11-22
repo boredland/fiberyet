@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+    paths-ignore:
+      - "data/**"
 
 jobs:
   test:
@@ -31,10 +33,13 @@ jobs:
           node-version: 22
       - run: uv sync --frozen
       - run: npm ci
+      # The command Cloudflare Workers Builds runs, against the real data/ in this checkout.
+      - name: npm run build (real data)
+        run: npm run build
       - name: Build the site from a synthetic data dir
         run: |
-          uv run python scripts/synthetic_data.py /tmp/fy-data
-          DATA_DIR=/tmp/fy-data bash scripts/build_site.sh
+          uv run python scripts/synthetic_data.py "$RUNNER_TEMP/fy-data"
+          DATA_DIR="$RUNNER_TEMP/fy-data" bash scripts/build_site.sh
       - run: npx playwright install --with-deps chromium
       - name: Drive it in a real browser
         run: |

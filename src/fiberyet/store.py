@@ -103,6 +103,7 @@ def save(con: sqlite3.Connection, data_dir: Path, provider: str) -> None:
 
 
 def _git(data_dir: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    """Run git from inside data_dir, which lives inside the repository's working tree."""
     return subprocess.run(
         ["git", "-C", str(data_dir), "-c", f"user.name={BOT[0]}", "-c", f"user.email={BOT[1]}", *args],
         check=check,
@@ -111,15 +112,20 @@ def _git(data_dir: Path, *args: str, check: bool = True) -> subprocess.Completed
     )
 
 
-def push(data_dir: Path, message: str, branch: str = "data") -> bool:
-    """Commit everything and push with a rebase retry loop. False when there was nothing to commit."""
-    _git(data_dir, "add", "-A")
-    if not _git(data_dir, "status", "--porcelain").stdout.strip():
+def push(data_dir: Path, message: str) -> bool:
+    """Commit only data_dir and push the current branch, rebasing on conflict.
+
+    False when data_dir has nothing new. Other changes in the repository are left alone: the path
+    argument limits both the staging and the commit, and the pull rebases with autostash.
+    """
+    _git(data_dir, "add", "-A", "--", ".")
+    if _git(data_dir, "diff", "--cached", "--quiet", "--", ".", check=False).returncode == 0:
         return False
-    _git(data_dir, "commit", "-m", message)
+    _git(data_dir, "commit", "-m", message, "--", ".")
+    branch = _git(data_dir, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     for _ in range(PUSH_ATTEMPTS):
         if _git(data_dir, "push", "origin", f"HEAD:{branch}", check=False).returncode == 0:
             return True
-        if _git(data_dir, "pull", "--rebase", "origin", branch, check=False).returncode != 0:
+        if _git(data_dir, "pull", "--rebase", "--autostash", "origin", branch, check=False).returncode != 0:
             _git(data_dir, "rebase", "--abort", check=False)
     raise RuntimeError("push still failing after retries")

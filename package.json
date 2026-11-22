@@ -2,6 +2,10 @@
   "name": "fiberyet",
   "private": true,
   "type": "module",
+  "scripts": {
+    "build": "bash scripts/build_site.sh",
+    "deploy": "npm run build && wrangler deploy"
+  },
   "dependencies": {
     "maplibre-gl": "6.19.0"
   },
