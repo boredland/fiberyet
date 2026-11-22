@@ -207,8 +207,9 @@ def build_polygons(data_dir: Path, con: sqlite3.Connection) -> dict | None:
 def write(out_dir: Path, cells: dict, districts: dict, summary: dict, polygons: dict | None = None) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     files = [("cells.geojson", cells), ("districts.geojson", districts), ("summary.json", summary)]
-    if polygons is not None:
-        files.append(("polygons.geojson", polygons))
+    if polygons is None:
+        polygons = {"type": "FeatureCollection", "features": []}
+    files.append(("polygons.geojson", polygons))
     for name, obj in files:
         text = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
         data = text.encode("utf-8")
