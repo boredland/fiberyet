@@ -43,7 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("advance", help="run one incremental crawl slice")
     p.add_argument("--provider", required=True, choices=PROVIDERS)
     p.add_argument("--budget-minutes", type=float, default=320)
-    p.add_argument("--checkpoint-minutes", type=float, default=60)
+    p.add_argument("--checkpoint-minutes", type=float, default=None, help="also commit and push this often (default: once, at the end)")
+    p.add_argument("--flush-rows", type=int, default=100, help="write progress to disk every N rows")
     p.add_argument("--districts")
     p.add_argument("--no-push", action="store_true")
 
@@ -104,7 +105,8 @@ def run_advance(args, con) -> None:
             args.provider,
             measure_with(args.provider, fetcher),
             budget_s=args.budget_minutes * 60,
-            checkpoint_s=args.checkpoint_minutes * 60,
+            checkpoint_s=None if args.checkpoint_minutes is None else args.checkpoint_minutes * 60,
+            flush_rows=args.flush_rows,
             districts=_districts(args.districts),
             push=not args.no_push,
         )

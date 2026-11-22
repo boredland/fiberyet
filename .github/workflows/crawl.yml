@@ -1,18 +1,20 @@
-# Measures in slices and commits data/ to main. Cloudflare Workers Builds deploys on each push to main
-# (build: `npm run build`, deploy: `npx wrangler deploy`), so there is no deploy job here.
+# Measures in short slices and commits data/ to main once per slice, with the counts in the commit
+# message. Cloudflare Workers Builds deploys on each push to main (build: `npm run build`), so there
+# is no deploy job here. Same shape as trinkhallen-data's enrich.yml: a wall-clock budget inside the
+# job timeout, per-provider concurrency, and a stats block in every commit.
 name: crawl
+run-name: crawl · ${{ inputs.provider || 'all' }}
 
 on:
-  schedule:
-    - cron: "7 */6 * * *"
+  # The hourly schedule is added back once three manual slices have run clean (see the PR history).
   workflow_dispatch:
     inputs:
       provider:
         description: "telekom, or all"
         default: all
       budget_minutes:
-        description: "crawl budget per slice (1-330)"
-        default: "320"
+        description: "crawl budget per slice, 1-330. The job timeout is this plus 10 minutes."
+        default: "45"
 
 jobs:
   select:
@@ -20,6 +22,7 @@ jobs:
     outputs:
       providers: ${{ steps.pick.outputs.providers }}
       budget: ${{ steps.pick.outputs.budget }}
+      timeout_min: ${{ steps.pick.outputs.timeout_min }}
     steps:
       # Inputs reach the shell only through env, and only after an allowlist / range check.
       - id: pick
@@ -31,7 +34,7 @@ jobs:
             all|telekom) providers='["telekom"]' ;;
             *) echo "unknown provider" >&2; exit 1 ;;
           esac
-          budget="${BUDGET:-320}"
+          budget="${BUDGET:-45}"
           case "$budget" in
             ''|*[!0-9]*) echo "budget must be a whole number of minutes" >&2; exit 1 ;;
           esac
@@ -40,11 +43,12 @@ jobs:
           fi
           echo "providers=$providers" >> "$GITHUB_OUTPUT"
           echo "budget=$budget" >> "$GITHUB_OUTPUT"
+          echo "timeout_min=$((budget + 10))" >> "$GITHUB_OUTPUT"
 
   crawl:
     needs: select
     runs-on: ${{ fromJSON(vars.RUNS_ON || '["ubuntu-24.04"]') }}
-    timeout-minutes: 350
+    timeout-minutes: ${{ fromJSON(needs.select.outputs.timeout_min) }}
     permissions:
       contents: write
     strategy:
@@ -68,18 +72,9 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - name: Crawl one slice
-        run: uv run fiberyet advance --provider "$PROVIDER" --budget-minutes "$BUDGET" --checkpoint-minutes 60
-      - name: Final save
+        run: uv run fiberyet advance --provider "$PROVIDER" --budget-minutes "$BUDGET" --flush-rows 100
+      # advance commits and pushes once, at the end, with the counts in the message. This step only
+      # catches a run that died before it could (rows flushed to data/ but never committed).
+      - name: Backstop save
         if: always()
         run: uv run fiberyet save-and-push --provider "$PROVIDER"
-      # A quiet repository disables scheduled workflows after 60 days. Whether a GITHUB_TOKEN push counts
-      # as activity is unverified, so an idle crawl still leaves a heartbeat commit once a month.
-      - name: Keep scheduled runs alive
-        run: |
-          last=$(git log -1 --format=%ct)
-          if [ $(( $(date +%s) - last )) -gt $(( 30 * 86400 )) ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git commit --allow-empty -m "keepalive"
-            git push
-          fi

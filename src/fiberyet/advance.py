@@ -1,16 +1,24 @@
-"""One slice of the incremental crawl: plan, measure, checkpoint, stop on a block.
+"""One slice of the incremental crawl: plan, measure, flush, stop cleanly, commit once.
 
-Output is counts only. Actions logs of a public repository are public, so
-nothing here may print an address, a URL or a response body.
+The shape follows trinkhallen-data's enrichment runs: work is bounded by a wall-clock budget and by
+SIGTERM/SIGINT (in-flight work finishes, nothing new starts), progress is flushed to disk every
+few rows, everything is committed once at the end with stats in the message, and stale entries are
+re-queued under a TTL so settled ones are not asked again.
+
+Output is counts only. Actions logs of a public repository are public, so nothing here may print an
+address, a URL or a response body.
 """
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
+import signal
 import sqlite3
 import time
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from . import infer, sampling, store
@@ -23,6 +31,10 @@ DEADLINE_MARGIN_S = 60.0
 BLOCK_PAUSE_HOURS = 24
 BLOCK_PAUSE_MAX_HOURS = 24 * 7
 BLOCK_PAUSE_S = 10.0
+# Rows that came back unmatched or errored are not asked again for this long (cf. trinkhallen's *_attempted TTL).
+RETRY_AFTER_DAYS = 30
+# Written to data/ on disk this often, so a killed runner loses at most this many rows.
+FLUSH_EVERY_ROWS = 100
 
 Measure = Callable[[str, str], "object"]
 
@@ -52,17 +64,20 @@ def crawl_pending(
     measure: Measure,
     *,
     should_stop: Callable[[], bool],
-    tick: Callable[[], None],
+    on_row: Callable[[], None],
     now: Callable[[], dt.datetime] = utcnow,
-) -> int:
-    """Measure pending rows in rowid order, committing each, so any stop resumes cleanly."""
+) -> Counter:
+    """Measure pending rows in rowid order, committing each, so any stop resumes cleanly.
+
+    Returns how many rows ended in each status.
+    """
     rows = con.execute(
         "SELECT m.rowid AS rid, a.street, a.house_number FROM measurement m"
         " JOIN address a ON a.id = m.address_id WHERE m.provider = ? AND m.status = 'pending'"
         " ORDER BY m.rowid",
         (provider,),
     ).fetchall()
-    done = 0
+    done: Counter = Counter()
     for row in rows:
         if should_stop():
             break
@@ -78,13 +93,18 @@ def crawl_pending(
                     row["rid"],
                 ),
             )
-        done += 1
-        tick()
+        done[result.status] += 1
+        on_row()
     return done
 
 
 def requeue_stale(con: sqlite3.Connection, provider: str, now: dt.datetime) -> int:
-    """Rollouts change answers, so old measurements expire. Re-measure the oldest, within a daily quota."""
+    """Re-measure what has expired, oldest first, within a daily quota.
+
+    Answers (yes/no) expire after REFRESH_AFTER_DAYS because rollouts change them. Rows that were
+    unmatched or errored are retried only after RETRY_AFTER_DAYS, so a duplicate address or a
+    malformed house number is not asked again every slice.
+    """
     today = now.strftime("%Y-%m-%d")
     used = con.execute(
         "SELECT COUNT(*) FROM measurement WHERE provider = ? AND measured_at LIKE ?", (provider, today + "%")
@@ -92,13 +112,15 @@ def requeue_stale(con: sqlite3.Connection, provider: str, now: dt.datetime) -> i
     quota = REFRESH_DAILY_QUOTA - used
     if quota <= 0:
         return 0
-    cutoff = (now - dt.timedelta(days=REFRESH_AFTER_DAYS)).strftime(TS)
+    answer_cutoff = (now - dt.timedelta(days=REFRESH_AFTER_DAYS)).strftime(TS)
+    retry_cutoff = (now - dt.timedelta(days=RETRY_AFTER_DAYS)).strftime(TS)
     ids = [
         r[0]
         for r in con.execute(
-            "SELECT address_id FROM measurement WHERE provider = ? AND status IN ('yes','no')"
-            " AND measured_at < ? ORDER BY (stage = 'holdout') DESC, measured_at, address_id LIMIT ?",
-            (provider, cutoff, quota),
+            "SELECT address_id FROM measurement WHERE provider = ? AND measured_at IS NOT NULL AND ("
+            " (status IN ('yes','no') AND measured_at < ?) OR (status IN ('unmatched','error') AND measured_at < ?))"
+            " ORDER BY (stage = 'holdout') DESC, measured_at, address_id LIMIT ?",
+            (provider, answer_cutoff, retry_cutoff, quota),
         )
     ]
     with con:
@@ -152,7 +174,8 @@ def advance(
     measure: Measure,
     *,
     budget_s: float,
-    checkpoint_s: float,
+    checkpoint_s: float | None = None,
+    flush_rows: int = FLUSH_EVERY_ROWS,
     districts: list[str] | None = None,
     push: bool = True,
     margin_s: float = DEADLINE_MARGIN_S,
@@ -160,7 +183,12 @@ def advance(
     now: Callable[[], dt.datetime] = utcnow,
     log: Callable[[str], None] = print,
 ) -> int:
-    """Run one slice. Exit code 0 normally, 3 when the provider blocked us."""
+    """Run one slice. Exit code 0 normally, 3 when the provider blocked us.
+
+    Rows are flushed to the data dir every `flush_rows`; the commit and push happen once, at the end
+    of the slice (and once more every `checkpoint_s` seconds if that is set). Each push is a Workers
+    Build, so an unchanged slice commits nothing.
+    """
     state = read_state(data_dir, provider)
     if state["disabled"]:
         log(f"{provider}: disabled in the state file")
@@ -170,49 +198,61 @@ def advance(
         return 0
 
     deadline = clock() + budget_s
-    last_checkpoint = [clock()]
-    measured = 0
+    last_push = [clock()]
+    rows_since_flush = [0]
+    counts: Counter = Counter()
+    phases: list[str] = []
+    request: dict = {}
 
     def should_stop() -> bool:
-        return clock() + margin_s >= deadline
+        return "reason" in request or clock() + margin_s >= deadline
 
-    def checkpoint(message: str) -> None:
+    def pending_count() -> int:
+        return con.execute(
+            "SELECT COUNT(*) FROM measurement WHERE provider = ? AND status = 'pending'", (provider,)
+        ).fetchone()[0]
+
+    def finish(outcome: str) -> None:
         store.save(con, data_dir, provider)
         if push:
-            store.push(data_dir, message)
-        last_checkpoint[0] = clock()
+            store.push(data_dir, commit_message(provider, outcome, counts, pending_count(), phases))
 
-    def tick() -> None:
-        if clock() - last_checkpoint[0] >= checkpoint_s:
-            checkpoint(f"data: {provider} checkpoint {now().strftime(TS)}")
+    def on_row() -> None:
+        rows_since_flush[0] += 1
+        if rows_since_flush[0] >= flush_rows:
+            store.save(con, data_dir, provider)
+            rows_since_flush[0] = 0
+        if checkpoint_s is not None and clock() - last_push[0] >= checkpoint_s:
+            finish("checkpoint")
+            last_push[0] = clock()
 
-    stamp = lambda: now().strftime("%Y-%m-%dT%H:%MZ")
-    try:
-        while not should_stop():
-            measured += crawl_pending(con, provider, measure, should_stop=should_stop, tick=tick, now=now)
-            if should_stop():
-                break
-            phase, planned = plan_next(con, provider, districts, now())
-            log(f"{provider}: planned {phase} +{planned}")
-            if phase == "idle":
-                break
-    except Blocked as exc:
-        _record_block(state, exc.status, now())
-        write_state(data_dir, provider, state)
-        checkpoint(f"data: {provider} blocked {stamp()}")
-        log(f"{provider}: BLOCKED status={exc.status}; paused, {measured} rows measured this run")
-        return 3
-    except Unavailable:
-        checkpoint(f"data: {provider} unavailable {stamp()}")
-        log(f"{provider}: unavailable after retries; {measured} rows measured this run")
-        return 0
+    with _stop_on_signals(request):
+        try:
+            while not should_stop():
+                counts.update(crawl_pending(con, provider, measure, should_stop=should_stop, on_row=on_row, now=now))
+                if should_stop():
+                    break
+                phase, planned = plan_next(con, provider, districts, now())
+                phases.append(f"{phase}+{planned}")
+                log(f"{provider}: planned {phase} +{planned}")
+                if phase == "idle":
+                    break
+        except Blocked as exc:
+            _record_block(state, exc.status, now())
+            write_state(data_dir, provider, state)
+            finish(f"blocked {exc.status}")
+            log(f"{provider}: BLOCKED status={exc.status}; paused, {sum(counts.values())} rows measured this run")
+            return 3
+        except Unavailable:
+            finish("unavailable")
+            log(f"{provider}: unavailable after retries; {sum(counts.values())} rows measured this run")
+            return 0
 
-    if measured and state["streak"]:
+    if sum(counts.values()) and state["streak"]:
         state["streak"] = 0
         write_state(data_dir, provider, state)
-    checkpoint(f"data: {provider} slice {stamp()}")
-    pending = con.execute(
-        "SELECT COUNT(*) FROM measurement WHERE provider = ? AND status = 'pending'", (provider,)
-    ).fetchone()[0]
-    log(f"{provider}: {measured} rows measured this run, {pending} pending")
+    stopped = request.get("reason")
+    finish(f"stopped on {stopped}" if stopped else "slice")
+    log(f"{provider}: {sum(counts.values())} rows measured this run, {pending_count()} pending"
+        + (f", stopped on {stopped}" if stopped else ""))
     return 0
