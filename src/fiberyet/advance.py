@@ -21,6 +21,7 @@ REFRESH_AFTER_DAYS = 90
 REFRESH_DAILY_QUOTA = 2000
 DEADLINE_MARGIN_S = 60.0
 BLOCK_PAUSE_HOURS = 24
+BLOCK_PAUSE_MAX_HOURS = 24 * 7
 BLOCK_PAUSE_S = 10.0
 
 Measure = Callable[[str, str], "object"]
@@ -33,8 +34,10 @@ def utcnow() -> dt.datetime:
 def read_state(data_dir: Path, provider: str) -> dict:
     path = data_dir / "state" / f"{provider}.json"
     if path.exists():
-        return json.loads(path.read_text())
-    return {"blocks": [], "pause_until": None, "pause_s": None, "disabled": False}
+        state = json.loads(path.read_text())
+        state.setdefault("streak", 0)
+        return state
+    return {"blocks": [], "streak": 0, "pause_until": None, "pause_s": None, "disabled": False}
 
 
 def write_state(data_dir: Path, provider: str, state: dict) -> None:
@@ -130,12 +133,16 @@ def plan_next(
 
 
 def _record_block(state: dict, status: int, now: dt.datetime) -> None:
+    """A block pauses the provider, longer for each consecutive one (24 h, 48 h, ... up to 7 days).
+
+    Runner addresses change from run to run, so a single refusal says little about us; nothing here
+    disables a provider for good. `disabled` is a switch a person sets by hand in the state file.
+    """
     state["blocks"].append({"at": now.strftime(TS), "status": status})
-    if len(state["blocks"]) == 1:
-        state["pause_until"] = (now + dt.timedelta(hours=BLOCK_PAUSE_HOURS)).strftime(TS)
-        state["pause_s"] = BLOCK_PAUSE_S
-    else:
-        state["disabled"] = True
+    state["streak"] = state.get("streak", 0) + 1
+    hours = min(BLOCK_PAUSE_HOURS * 2 ** (state["streak"] - 1), BLOCK_PAUSE_MAX_HOURS)
+    state["pause_until"] = (now + dt.timedelta(hours=hours)).strftime(TS)
+    state["pause_s"] = BLOCK_PAUSE_S
 
 
 def advance(
@@ -156,7 +163,7 @@ def advance(
     """Run one slice. Exit code 0 normally, 3 when the provider blocked us."""
     state = read_state(data_dir, provider)
     if state["disabled"]:
-        log(f"{provider}: disabled after repeated blocks")
+        log(f"{provider}: disabled in the state file")
         return 0
     if state["pause_until"] and now().strftime(TS) < state["pause_until"]:
         log(f"{provider}: paused until {state['pause_until']}")
@@ -200,6 +207,9 @@ def advance(
         log(f"{provider}: unavailable after retries; {measured} rows measured this run")
         return 0
 
+    if measured and state["streak"]:
+        state["streak"] = 0
+        write_state(data_dir, provider, state)
     checkpoint(f"data: {provider} slice {stamp()}")
     pending = con.execute(
         "SELECT COUNT(*) FROM measurement WHERE provider = ? AND status = 'pending'", (provider,)

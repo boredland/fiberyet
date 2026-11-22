@@ -111,26 +111,67 @@ def test_block_stops_pauses_for_24h_and_next_run_makes_no_request(tmp_path):
     state = json.loads((tmp_path / "state" / "p.json").read_text())
     assert state["blocks"] == [{"at": "2026-11-22T12:00:00Z", "status": 403}]
     assert state["pause_until"] == "2026-11-23T12:00:00Z" and state["pause_s"] == 10.0
-    assert state["disabled"] is False
+    assert state["disabled"] is False and state["streak"] == 1
 
     calls = []
     code, logs = run(con, tmp_path, lambda s, n: calls.append(1))
     assert code == 0 and calls == [] and "paused until" in logs[0]
 
 
-def test_second_block_disables_provider(tmp_path):
+def test_repeated_blocks_pause_longer_and_never_disable(tmp_path):
     con = world(tmp_path)
     run(con, tmp_path, blocker(429))
+    expected_hours = [24, 48, 96, 168, 168]  # doubles, capped at 7 days
+    at = T0
+    for streak, hours in enumerate(expected_hours[1:], start=2):
+        at = at + dt.timedelta(hours=expected_hours[streak - 2] + 1)
+        code = advance.advance(con, tmp_path, "p", blocker(429), budget_s=1000, checkpoint_s=1000, push=False,
+                               margin_s=0, clock=Clock(), now=lambda at=at: at, log=lambda m: None)
+        assert code == 3
+        state = json.loads((tmp_path / "state" / "p.json").read_text())
+        assert state["streak"] == streak and state["disabled"] is False
+        paused_for = dt.datetime.strptime(state["pause_until"], advance.TS).replace(tzinfo=dt.UTC) - at
+        assert paused_for == dt.timedelta(hours=hours)
+
+
+def test_a_clean_slice_resets_the_streak(tmp_path):
+    con = world(tmp_path)
+    run(con, tmp_path, blocker(403))
     later = T0 + dt.timedelta(hours=25)
-    logs = []
-    code = advance.advance(con, tmp_path, "p", blocker(429), budget_s=1000, checkpoint_s=1000, push=False,
-                           margin_s=0, clock=Clock(), now=lambda: later, log=logs.append)
-    assert code == 3
+    clock = Clock()
+    code = advance.advance(
+        con, tmp_path, "p", counting(lambda s, n: SimpleNamespace(status="yes", detail="d", raw="B"), clock),
+        budget_s=200, checkpoint_s=10_000, push=False, margin_s=0, clock=clock, now=lambda: later,
+        log=lambda m: None,
+    )
+    assert code == 0
     state = json.loads((tmp_path / "state" / "p.json").read_text())
-    assert state["disabled"] is True and len(state["blocks"]) == 2
+    assert state["streak"] == 0 and len(state["blocks"]) == 1
+    # the next block starts again at 24 h
+    again = later + dt.timedelta(hours=1)
+    advance.advance(con, tmp_path, "p", blocker(403), budget_s=1000, checkpoint_s=1000, push=False,
+                    margin_s=0, clock=Clock(), now=lambda: again, log=lambda m: None)
+    state = json.loads((tmp_path / "state" / "p.json").read_text())
+    paused_for = dt.datetime.strptime(state["pause_until"], advance.TS).replace(tzinfo=dt.UTC) - again
+    assert state["streak"] == 1 and paused_for == dt.timedelta(hours=24)
+
+
+def test_a_hand_set_disabled_flag_still_stops_the_provider(tmp_path):
+    con = world(tmp_path)
+    (tmp_path / "state").mkdir(exist_ok=True)
+    (tmp_path / "state" / "p.json").write_text(json.dumps(
+        {"blocks": [], "streak": 0, "pause_until": None, "pause_s": None, "disabled": True}))
     calls = []
     code, logs = run(con, tmp_path, lambda s, n: calls.append(1))
     assert code == 0 and calls == [] and "disabled" in logs[0]
+
+
+def test_an_old_state_file_without_streak_still_loads(tmp_path):
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state" / "p.json").write_text(json.dumps(
+        {"blocks": [{"at": "2026-11-22T12:00:00Z", "status": 403}], "pause_until": None, "pause_s": 10.0,
+         "disabled": False}))
+    assert advance.read_state(tmp_path, "p")["streak"] == 0
 
 
 def test_blocked_status_zero_for_non_json_is_recorded(tmp_path):
