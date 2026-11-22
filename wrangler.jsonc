@@ -3,5 +3,6 @@
   "name": "fiberyet",
   "compatibility_date": "2026-11-22",
   "workers_dev": true,
-  "assets": { "directory": "./dist" }
+  "assets": { "directory": "./dist" },
+  "routes": [{ "pattern": "glasfaserwtf.jonas-strassel.de", "custom_domain": true }]
 }
