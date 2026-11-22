@@ -1,0 +1,115 @@
+name: crawl
+
+on:
+  schedule:
+    - cron: "7 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "telekom, or all"
+        default: all
+      budget_minutes:
+        description: "crawl budget per slice (1-330)"
+        default: "320"
+
+jobs:
+  select:
+    runs-on: ubuntu-24.04
+    outputs:
+      providers: ${{ steps.pick.outputs.providers }}
+      budget: ${{ steps.pick.outputs.budget }}
+    steps:
+      # Inputs reach the shell only through env, and only after an allowlist / range check.
+      - id: pick
+        env:
+          PROVIDER: ${{ inputs.provider }}
+          BUDGET: ${{ inputs.budget_minutes }}
+        run: |
+          case "${PROVIDER:-all}" in
+            all|telekom) providers='["telekom"]' ;;
+            *) echo "unknown provider" >&2; exit 1 ;;
+          esac
+          budget="${BUDGET:-320}"
+          case "$budget" in
+            ''|*[!0-9]*) echo "budget must be a whole number of minutes" >&2; exit 1 ;;
+          esac
+          if [ "$budget" -lt 1 ] || [ "$budget" -gt 330 ]; then
+            echo "budget must be 1-330" >&2; exit 1
+          fi
+          echo "providers=$providers" >> "$GITHUB_OUTPUT"
+          echo "budget=$budget" >> "$GITHUB_OUTPUT"
+
+  crawl:
+    needs: select
+    runs-on: ${{ fromJSON(vars.RUNS_ON || '["ubuntu-24.04"]') }}
+    timeout-minutes: 350
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: ${{ fromJSON(needs.select.outputs.providers) }}
+    concurrency:
+      group: crawl-${{ matrix.provider }}
+      cancel-in-progress: false
+    env:
+      FIBERYET_PROXY: ${{ vars.FIBERYET_PROXY }}
+      FETCH_PROXY_URL: ${{ secrets.FETCH_PROXY_URL }}
+      FETCH_PROXY_TOKEN: ${{ secrets.FETCH_PROXY_TOKEN }}
+      CRAWL_PAUSE_S: ${{ vars.CRAWL_PAUSE_S }}
+      PROVIDER: ${{ matrix.provider }}
+      BUDGET: ${{ needs.select.outputs.budget }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          ref: data
+          path: data
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Crawl one slice
+        run: uv run fiberyet advance --provider "$PROVIDER" --budget-minutes "$BUDGET" --checkpoint-minutes 60
+      - name: Final save
+        if: always()
+        run: uv run fiberyet save-and-push --provider "$PROVIDER"
+
+  publish:
+    needs: [select, crawl]
+    if: always() && needs.select.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          ref: data
+          path: data
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: uv sync --frozen
+      - run: npm ci
+      - run: bash scripts/build_site.sh
+      - name: Deploy
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Keep scheduled runs alive
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt $(( 30 * 86400 )) ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "keepalive"
+            git push
+          fi

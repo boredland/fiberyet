@@ -1,0 +1,25 @@
+# One-off: do the providers' checkers answer GitHub-hosted runner IPs at all?
+# Four requests per provider at most. Prints provider, status, detail only.
+name: probe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ${{ fromJSON(vars.RUNS_ON || '["ubuntu-24.04"]') }}
+    timeout-minutes: 10
+    env:
+      FIBERYET_PROXY: ${{ vars.FIBERYET_PROXY }}
+      FETCH_PROXY_URL: ${{ secrets.FETCH_PROXY_URL }}
+      FETCH_PROXY_TOKEN: ${{ secrets.FETCH_PROXY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Telekom, fiber expected
+        run: uv run fiberyet probe --provider telekom --street "Römerberg" --number 23
+      - name: Telekom, no fiber expected
+        run: uv run fiberyet probe --provider telekom --street "Alt-Heddernheim" --number 30

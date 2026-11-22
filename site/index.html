@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Glasfaser in Frankfurt: gemessen</title>
+  <meta name="description" content="Wo ist Glasfaser (FTTH) in Frankfurt laut den Verfügbarkeitsprüfungen der Anbieter bestellbar? Gemessene Stichproben, hochgerechnet auf 100-m-Felder.">
+  <link rel="stylesheet" href="./vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <aside id="panel">
+    <h1>Glasfaser in Frankfurt</h1>
+    <p class="note">Zeigt den technischen Stand laut Anbieter-Check. Keine Zusage für ein einzelnes Gebäude.</p>
+    <fieldset id="views">
+      <legend>Anbieter</legend>
+      <label><input type="radio" name="view" value="a" checked> Alle Netze</label>
+      <label><input type="radio" name="view" value="t"> Telekom</label>
+      <label><input type="radio" name="view" value="e"> 1&amp;1</label>
+      <label><input type="radio" name="view" value="g"> TNG</label>
+    </fieldset>
+    <div id="legend" aria-label="Legende">
+      <span><i style="background:#f1eef6"></i>0&nbsp;%</span>
+      <span><i style="background:#bdc9e1"></i>10–30</span>
+      <span><i style="background:#74a9cf"></i>40–60</span>
+      <span><i style="background:#2b8cbe"></i>70–80</span>
+      <span><i style="background:#045a8d"></i>90–100&nbsp;%</span>
+      <span><i style="background:#cccccc"></i>überwiegend unbekannt</span>
+      <span><i style="background:#eeeeee;border:1px solid #bbb"></i>zu wenige Adressen</span>
+    </div>
+    <p id="phase"></p>
+    <h2>Stadtteile</h2>
+    <ol id="districts"></ol>
+    <p id="stats"></p>
+    <p class="attribution">
+      Messungen: eigene Abfragen der Verfügbarkeitsprüfungen der Anbieter.
+      Adressen: HVBG Hessen (dl-de/zero-2.0).
+      Gebietsgrenzen: Stadt Frankfurt am Main (dl-by-de/2.0), vereinfacht.
+      Karte: OpenFreeMap, © OpenMapTiles, © OpenStreetMap-Mitwirkende.
+    </p>
+  </aside>
+  <div id="map"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
