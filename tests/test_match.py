@@ -13,6 +13,8 @@ def test_accents_in_street_names_do_not_prevent_a_match():
     assert same_address("Zum Linnegraben", "17d", "Zum Linnégraben", "17D")
     assert norm_street("Cézanneweg") == norm_street("Cezanneweg")
     assert norm_street("Grüne Straße") != norm_street("Grüneburgweg")
+    # umlauts are kept: a street called Grune must not match Grüne
+    assert norm_street("Grüne Straße") != norm_street("Grune Strasse")
 
 
 def test_ranges_do_not_match_single_numbers():

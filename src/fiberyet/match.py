@@ -11,13 +11,13 @@ import unicodedata
 
 
 def _fold_accents(s: str) -> str:
-    """Drop accents other than the umlauts already handled by the character class below.
+    """Drop accents other than the umlauts, then recompose so ä ö ü stay single characters.
 
-    Cadastre and provider spellings disagree on names like Linnegraben/Linnégraben. Four streets in
-    the Frankfurt frame are affected and folding them creates no collisions.
+    Cadastre and provider spellings disagree on names like Linnegraben/Linnégraben.
     """
     decomposed = unicodedata.normalize("NFD", s)
-    return "".join(c for c in decomposed if unicodedata.category(c) != "Mn" or c == "\u0308")
+    without_accents = "".join(c for c in decomposed if unicodedata.category(c) != "Mn" or c == "\u0308")
+    return unicodedata.normalize("NFC", without_accents)
 
 
 def norm_street(s: str) -> str:
