@@ -7,10 +7,21 @@ distance-based or fuzzy fallback.
 from __future__ import annotations
 
 import re
+import unicodedata
+
+
+def _fold_accents(s: str) -> str:
+    """Drop accents other than the umlauts already handled by the character class below.
+
+    Cadastre and provider spellings disagree on names like Linnegraben/Linnégraben. Four streets in
+    the Frankfurt frame are affected and folding them creates no collisions.
+    """
+    decomposed = unicodedata.normalize("NFD", s)
+    return "".join(c for c in decomposed if unicodedata.category(c) != "Mn" or c == "\u0308")
 
 
 def norm_street(s: str) -> str:
-    s = s.casefold().replace("ß", "ss")
+    s = _fold_accents(s).casefold().replace("ß", "ss")
     s = re.sub(r"strasse|str\.", "str", s)
     return re.sub(r"[^a-z0-9äöü]", "", s)
 
