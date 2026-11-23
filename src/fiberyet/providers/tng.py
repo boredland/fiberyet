@@ -161,6 +161,7 @@ def fetch_result_html(
                     page.wait_for_load_state("networkidle", timeout=10000)
                 except Exception:  # noqa: BLE001
                     pass
+                page.wait_for_timeout(3000)
                 html = page.content()
                 return html, None
             finally:
@@ -204,4 +205,4 @@ def measure(fetcher: Fetcher, street: str, house_number: str, plz: str | None) -
             return Result("unmatched", err, None)
         return Result("error", err or "no-page", None)
     status, detail = classify(html)
-    return Result(status, detail, html[:2000])
+    return Result(status, detail, html)
