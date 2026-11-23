@@ -90,8 +90,14 @@ def fetch_result_html(
                 inp = page.locator('input[name="zip-and-city"]')
                 inp.click()
                 inp.press_sequentially(f"{plz} {CITY}", delay=80)
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(8000)
                 dump(page, "1a_after_type")
+                try:
+                    page.keyboard.press("ArrowDown")
+                    page.wait_for_timeout(2000)
+                except Exception:  # noqa: BLE001
+                    pass
+                dump(page, "1b_after_nudge")
                 page.wait_for_selector('[role="option"]', timeout=15000)
                 opts = page.locator('[role="option"]')
                 picked = False
