@@ -15,6 +15,9 @@ on:
       budget_minutes:
         description: "crawl budget per slice, 1-330. The job timeout is this plus 10 minutes."
         default: "45"
+      districts:
+        description: "comma-separated districts for coarse/refine (default: TNG's eight for tng, empty otherwise)"
+        default: ""
 
 jobs:
   select:
@@ -23,12 +26,14 @@ jobs:
       providers: ${{ steps.pick.outputs.providers }}
       budget: ${{ steps.pick.outputs.budget }}
       timeout_min: ${{ steps.pick.outputs.timeout_min }}
+      districts: ${{ steps.pick.outputs.districts }}
     steps:
       # Inputs reach the shell only through env, and only after an allowlist / range check.
       - id: pick
         env:
           PROVIDER: ${{ inputs.provider }}
           BUDGET: ${{ inputs.budget_minutes }}
+          DISTRICTS: ${{ inputs.districts }}
         run: |
           case "${PROVIDER:-all}" in
             all) providers='["telekom","einsundeins","tng"]' ;;
@@ -42,9 +47,11 @@ jobs:
           if [ "$budget" -lt 1 ] || [ "$budget" -gt 330 ]; then
             echo "budget must be 1-330" >&2; exit 1
           fi
+          districts="${DISTRICTS:-}"
           echo "providers=$providers" >> "$GITHUB_OUTPUT"
           echo "budget=$budget" >> "$GITHUB_OUTPUT"
           echo "timeout_min=$((budget + 10))" >> "$GITHUB_OUTPUT"
+          echo "districts=$districts" >> "$GITHUB_OUTPUT"
 
   crawl:
     needs: select
@@ -66,6 +73,7 @@ jobs:
       CRAWL_PAUSE_S: ${{ vars.CRAWL_PAUSE_S }}
       PROVIDER: ${{ matrix.provider }}
       BUDGET: ${{ needs.select.outputs.budget }}
+      DISTRICTS: ${{ needs.select.outputs.districts }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
@@ -76,7 +84,14 @@ jobs:
         if: matrix.provider == 'tng'
         run: uv run playwright install --with-deps chromium
       - name: Crawl one slice
-        run: uv run fiberyet advance --provider "$PROVIDER" --budget-minutes "$BUDGET" --flush-rows 100
+        run: |
+          districts="${DISTRICTS:-}"
+          if [ -z "$districts" ] && [ "$PROVIDER" = "tng" ]; then
+            districts="Berkersheim,Eckenheim,Eschersheim,Ginnheim,Heddernheim,Preungesheim,Seckbach,Frankfurter Berg"
+          fi
+          args=(--provider "$PROVIDER" --budget-minutes "$BUDGET" --flush-rows 100)
+          if [ -n "$districts" ]; then args+=(--districts "$districts"); fi
+          uv run fiberyet advance "${args[@]}"
       # advance commits and pushes once, at the end, with the counts in the message. This step only
       # catches a run that died before it could (rows flushed to data/ but never committed).
       - name: Backstop save

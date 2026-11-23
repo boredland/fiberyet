@@ -14,6 +14,9 @@ from ..fetch import Fetcher
 
 BASE = "https://bestellung.tng.de/bestellstrecke/verfuegbarkeit?productId=PKGFSURF1000"
 CITY = "Frankfurt am Main"
+# Playwright loads bypass the Fetcher's per-host limiter, so pace lookups here (plan: 5 s apart).
+PAUSE_S = 5.0
+_last_lookup = [0.0]
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,13 @@ class Result:
 def measure(fetcher: Fetcher, street: str, house_number: str, plz: str | None) -> Result:
     if not plz:
         return Result("unmatched", "no-plz", None)
+
+    import time
+
+    wait = _last_lookup[0] + PAUSE_S - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+    _last_lookup[0] = time.monotonic()
 
     try:
         from playwright.sync_api import sync_playwright
