@@ -86,7 +86,7 @@ def measure(fetcher: Fetcher, street: str, house_number: str, plz: str | None) -
     # Fetch the result page and read the subheading class.
     page = fetcher.get(RESULT_URL)
     status, detail = classify(page.text)
-    return Result(status, detail, page.text[:2000])
+    return Result(status, detail, subheading_html(page.text))
 
 
 def classify(html: str) -> tuple[str, str]:
@@ -100,3 +100,12 @@ def classify(html: str) -> tuple[str, str]:
     if cls in ("dsl-only-in-gf", "dsl-16-only-in-gf"):
         return "no", cls
     return "error", f"unknown:{cls}"
+
+
+def subheading_html(html: str) -> str:
+    """The subheading element's inner HTML, so future unknown classes can be re-classified."""
+    m = re.search(
+        r'<div class="[^"]*v-check__subheading[^"]*"[^>]*>\s*(<div class="[\w-]+">.*?</div>)',
+        html, re.S,
+    )
+    return m.group(1)[:2000] if m else html[:2000]

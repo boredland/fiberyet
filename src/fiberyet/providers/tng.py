@@ -7,6 +7,8 @@ find the desired street. Result pages are classified by `classify`.
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass
 from typing import Optional
 
@@ -165,8 +167,6 @@ def classify(html: str) -> tuple[str, str]:
     No: the availability form re-rendered ("Prüfen Sie die Verfügbarkeit an Ihrer
     Anschlussadresse") after submit — no product offered.
     """
-    import re
-
     # Next.js embeds error-message templates in every page's JS config; strip scripts.
     visible = re.sub(r"<script.*?</script>", " ", html, flags=re.S | re.I)
     visible = re.sub(r"<style.*?</style>", " ", visible, flags=re.S | re.I)
