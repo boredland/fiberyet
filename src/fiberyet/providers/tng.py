@@ -154,6 +154,10 @@ def fetch_result_html(
                     page.click('button[type="submit"]')
                 page.wait_for_load_state("domcontentloaded", timeout=15000)
                 try:
+                    page.wait_for_url("**/wunschtarif", timeout=15000)
+                except Exception:  # noqa: BLE001 - stayed on the form (no fiber)
+                    pass
+                try:
                     page.wait_for_load_state("networkidle", timeout=10000)
                 except Exception:  # noqa: BLE001
                     pass
@@ -177,12 +181,16 @@ def classify(html: str) -> tuple[str, str]:
     visible = re.sub(r"<script.*?</script>", " ", html, flags=re.S | re.I)
     visible = re.sub(r"<style.*?</style>", " ", visible, flags=re.S | re.I)
     low = re.sub(r"<[^>]+>", " ", visible).casefold()
+    # Unmatched: address not found.
     if "die adresse ist uns leider nicht bekannt" in low or "adresse nicht eindeutig" in low:
         return "unmatched", "address-error"
+    # Yes: tariff page with product offered.
     if "tarif für sie verfügbar" in low and "was trifft auf sie zu" in low:
         return "yes", "tariff-offered"
-    if "prüfen sie die verfügbarkeit an ihrer anschlussadresse" in low:
+    # No: form re-rendered after submit, no product offered.
+    if "prüfen sie die verfügbarkeit an ihrer anschlussadresse" in low and "jetzt prüfen" in low:
         return "no", "no-tariff"
+    # Anything else is an error, not a silent 'no'.
     return "error", "unclassified"
 
 

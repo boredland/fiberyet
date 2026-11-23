@@ -88,7 +88,7 @@ def crawl_pending(
                 (
                     result.status,
                     result.detail,
-                    None if result.status in ("yes", "no") else result.raw,
+                    result.raw,
                     now().strftime(TS),
                     row["rid"],
                 ),
