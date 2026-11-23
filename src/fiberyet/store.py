@@ -19,6 +19,7 @@ from . import db
 FRAME_COLUMNS = ("id", "street", "house_number", "plz", "district", "x", "y", "lon", "lat")
 BOT = ("github-actions[bot]", "github-actions[bot]@users.noreply.github.com")
 PUSH_ATTEMPTS = 5
+TEXT_SUFFIXES = {".jsonl", ".json", ".txt", ".csv", ".md", ".keep"}
 
 
 def save_frame(con: sqlite3.Connection, data_dir: Path, version: str) -> None:
@@ -153,9 +154,8 @@ def _merge_jsonl(local_path: Path, local_text: str, remote_text: str) -> None:
 def push(data_dir: Path, message: str) -> bool:
     """Commit only data_dir and push the current branch.
 
-    On push failure (e.g. concurrent crawl), fetches remote, resets to it, merges
-    local file changes on top, re-commits and pushes. Stashes uncommitted changes
-    outside data_dir (e.g. README edits) so they survive the reset.
+    On push failure (e.g. concurrent crawl), stashes uncommitted changes, fetches
+    remote, resets to it, merges local file changes on top, re-commits and pushes.
     """
     _git(data_dir, "add", "-A", "--", ".")
     if _git(data_dir, "diff", "--cached", "--quiet", "--", ".", check=False).returncode == 0:
@@ -165,13 +165,13 @@ def push(data_dir: Path, message: str) -> bool:
     for _ in range(PUSH_ATTEMPTS):
         if _git(data_dir, "push", "origin", f"HEAD:{branch}", check=False).returncode == 0:
             return True
-        # Push failed: stash, fetch remote, reset, merge, re-commit, push, unstash.
+        # Push failed: stash, fetch, reset, merge, re-commit, push, unstash.
         _git(data_dir, "stash", "push", "--include-untracked", "-m", "push-stash", check=False)
         _git(data_dir, "fetch", "origin", branch, check=False)
-        # Save ALL local files before reset.
+        # Save ALL local text files before reset.
         local_files: dict[str, str] = {}
         for fpath in data_dir.rglob("*"):
-            if fpath.is_file():
+            if fpath.is_file() and fpath.suffix in TEXT_SUFFIXES:
                 rel = fpath.relative_to(data_dir).as_posix()
                 local_files[rel] = fpath.read_text(encoding="utf-8")
         # Reset to remote (discards local commit, but we saved file contents).
