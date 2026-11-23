@@ -80,9 +80,12 @@ def fetch_result_html(
                 page.locator('input[name="customer-type"][value="new"]').check()
 
                 # PLZ + city
-                page.locator('input[name="zip-and-city"]').press_sequentially(f"{plz} {CITY}", delay=50)
-                page.wait_for_selector('[role="option"]', timeout=10000)
-                dump(page, "1_plz_options")
+                inp = page.locator('input[name="zip-and-city"]')
+                inp.click()
+                inp.press_sequentially(f"{plz} {CITY}", delay=80)
+                page.wait_for_timeout(3000)
+                dump(page, "1a_after_type")
+                page.wait_for_selector('[role="option"]', timeout=15000)
                 opts = page.locator('[role="option"]')
                 picked = False
                 for i in range(opts.count()):
