@@ -34,6 +34,16 @@ def test_missing_subheading_is_an_error():
     assert einsundeins.classify("<html><body>nothing here</body></html>") == ("error", "no-subheading")
 
 
+
+def test_gf_only_is_yes():
+    html = GALLERY % ("gf-only", "In 60528 Frankfurt am Main, Adolfstr. 23 C sind 1&1 Glasfaser-Tarife verfügbar.")
+    assert einsundeins.classify(html) == ("yes", "gf-only")
+
+
+def test_dsl_16_only_is_no():
+    html = GALLERY % ("dsl-16-only-in-gf", "In 65929 Frankfurt am Main, Hochmuhl 5 ist ein 1&1 Glasfaser-Direktanschluss derzeit noch nicht verfügbar.")
+    assert einsundeins.classify(html) == ("no", "dsl-16-only-in-gf")
+
 def test_missing_plz_never_requests():
     f = Fetcher()
     try:

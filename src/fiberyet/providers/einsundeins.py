@@ -95,8 +95,8 @@ def classify(html: str) -> tuple[str, str]:
     if not m:
         return "error", "no-subheading"
     cls = m.group(1)
-    if cls == "gf-vvm":
+    if cls in ("gf-vvm", "gf-only"):
         return "yes", cls
-    if cls == "dsl-only-in-gf":
+    if cls in ("dsl-only-in-gf", "dsl-16-only-in-gf"):
         return "no", cls
     return "error", f"unknown:{cls}"
