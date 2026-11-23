@@ -38,12 +38,9 @@ def main(addrs: list[str]) -> None:
             continue
         tng.pace()
         try:
-            html, err = tng.fetch_result_html(street, number, plz)
-        except ValueError as exc:
-            print(f"{entry}: unmatched {exc}")
-            continue
-        except Exception as exc:  # noqa: BLE001 - report and continue with the next address
-            print(f"{entry}: error playwright:{type(exc).__name__}")
+            html, err = tng.fetch_result_html(street, number, plz, debug_dir=OUT, debug_name=f"tng_{slug(street, number)}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"{entry}: error playwright:{type(exc).__name__}: {str(exc)[:200]}")
             continue
         if html is None:
             print(f"{entry}: error {err}")
