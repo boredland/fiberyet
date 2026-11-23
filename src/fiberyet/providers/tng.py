@@ -89,7 +89,7 @@ def fetch_result_html(
                 # PLZ + city
                 inp = page.locator('input[name="zip-and-city"]')
                 inp.click()
-                inp.press_sequentially(f"{plz} {CITY}", delay=80)
+                inp.press_sequentially(plz, delay=80)
                 page.wait_for_timeout(8000)
                 dump(page, "1a_after_type")
                 try:
