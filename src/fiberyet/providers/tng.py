@@ -144,6 +144,11 @@ def fetch_result_html(
                     page.wait_for_load_state("networkidle", timeout=10000)
                 except Exception:  # noqa: BLE001
                     pass
+                print(f"TNG DEBUG url={page.url} title={page.title()}", flush=True)
+                try:
+                    print(f"TNG DEBUG body={page.locator('body').inner_text()[-800:]}", flush=True)
+                except Exception:  # noqa: BLE001
+                    pass
                 html = page.content()
                 return html, None
             finally:
