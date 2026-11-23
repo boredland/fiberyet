@@ -138,17 +138,22 @@ def fetch_result_html(
                 except Exception:  # noqa: BLE001
                     pass
 
-                page.click('button[type="submit"]')
+                # Capture the submit response (Next.js server action).
+                try:
+                    with page.expect_response(lambda r: r.request.method == "POST", timeout=15000) as resp_info:
+                        page.click('button[type="submit"]')
+                    resp = resp_info.value
+                    print(f"TNG DEBUG post={resp.url} status={resp.status} body={resp.text()[:400]}", flush=True)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"TNG DEBUG post_err={type(exc).__name__}:{str(exc)[:200]}", flush=True)
+                    page.click('button[type="submit"]')
                 page.wait_for_load_state("domcontentloaded", timeout=15000)
                 try:
                     page.wait_for_load_state("networkidle", timeout=10000)
                 except Exception:  # noqa: BLE001
                     pass
-                print(f"TNG DEBUG url={page.url} title={page.title()}", flush=True)
-                try:
-                    print(f"TNG DEBUG body={page.locator('body').inner_text()[-800:]}", flush=True)
-                except Exception:  # noqa: BLE001
-                    pass
+                body_debug = page.locator("body").inner_text()
+                print(f"TNG DEBUG url={page.url} title={page.title()} content_len={len(page.content())} body={body_debug[:1500]}", flush=True)
                 html = page.content()
                 return html, None
             finally:
