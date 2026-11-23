@@ -7,8 +7,6 @@ find the desired street. Result pages are classified by `classify`.
 
 from __future__ import annotations
 
-import re
-
 from dataclasses import dataclass
 from typing import Optional
 
@@ -173,11 +171,12 @@ def fetch_result_html(
 def classify(html: str) -> tuple[str, str]:
     """Classify a captured TNG result page.
 
-    Yes: the tariff page (`/wunschtarif`) with "Tarif für Sie verfügbar" and
-    occupancy selection ("Was trifft auf Sie zu?").
-    No: the availability form re-rendered ("Prüfen Sie die Verfügbarkeit an Ihrer
-    Anschlussadresse") after submit — no product offered.
+    Yes: the tariff page with "Tarif für Sie verfügbar" and occupancy selection.
+    No:  landed on /wunschtarif but the tariff is not available, OR the form
+         re-rendered after submit with no product offered.
     """
+    import re
+
     # Next.js embeds error-message templates in every page's JS config; strip scripts.
     visible = re.sub(r"<script.*?</script>", " ", html, flags=re.S | re.I)
     visible = re.sub(r"<style.*?</style>", " ", visible, flags=re.S | re.I)
@@ -188,6 +187,9 @@ def classify(html: str) -> tuple[str, str]:
     # Yes: tariff page with product offered.
     if "tarif für sie verfügbar" in low and "was trifft auf sie zu" in low:
         return "yes", "tariff-offered"
+    # No: tariff not available (landed on /wunschtarif but no product).
+    if "wunschtarif nicht verfügbar" in low or "tarif nicht verfügbar" in low:
+        return "no", "tariff-unavailable"
     # No: form re-rendered after submit, no product offered.
     if "prüfen sie die verfügbarkeit an ihrer anschlussadresse" in low and "jetzt prüfen" in low:
         return "no", "no-tariff"
