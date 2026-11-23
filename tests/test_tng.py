@@ -29,3 +29,12 @@ def test_address_error_is_unmatched():
 
 def test_unknown_page_is_error():
     assert tng.classify("<html><body>unexpected</body></html>") == ("error", "unclassified")
+
+
+def test_stored_raw_preserves_classification():
+    """The raw that measure() stores must re-classify identically."""
+    for name, expected in [("tng_a.html", ("yes", "tariff-offered")), ("tng_b.html", ("no", "no-tariff"))]:
+        html = (FIXTURES / name).read_text()
+        raw = tng.stored_raw(html)
+        assert tng.classify(raw) == expected, (name, tng.classify(raw), expected)
+        assert len(raw) <= 3000

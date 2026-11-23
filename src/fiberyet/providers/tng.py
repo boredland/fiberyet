@@ -7,6 +7,7 @@ find the desired street. Result pages are classified by `classify`.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -175,8 +176,6 @@ def classify(html: str) -> tuple[str, str]:
     No:  landed on /wunschtarif but the tariff is not available, OR the form
          re-rendered after submit with no product offered.
     """
-    import re
-
     # Next.js embeds error-message templates in every page's JS config; strip scripts.
     visible = re.sub(r"<script.*?</script>", " ", html, flags=re.S | re.I)
     visible = re.sub(r"<style.*?</style>", " ", visible, flags=re.S | re.I)
@@ -197,6 +196,19 @@ def classify(html: str) -> tuple[str, str]:
     return "error", "unclassified"
 
 
+def stored_raw(html: str) -> str:
+    """The stripped visible text (~3 KB) that measure() stores as raw."""
+    title_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
+    title = title_m.group(1) if title_m else ""
+    main_m = re.search(r"<main[^>]*>(.*?)</main>", html, re.S | re.I)
+    body = main_m.group(1) if main_m else html
+    visible = re.sub(r"<script.*?</script>", " ", body, flags=re.S | re.I)
+    visible = re.sub(r"<style.*?</style>", " ", visible, flags=re.S | re.I)
+    visible = re.sub(r"<[^>]+>", " ", visible)
+    visible = re.sub(r"\s+", " ", visible).strip()
+    return (title + " " + visible).strip()[:3000]
+
+
 def measure(fetcher: Fetcher, street: str, house_number: str, plz: str | None) -> Result:
     if not plz:
         return Result("unmatched", "no-plz", None)
@@ -207,4 +219,4 @@ def measure(fetcher: Fetcher, street: str, house_number: str, plz: str | None) -
             return Result("unmatched", err, None)
         return Result("error", err or "no-page", None)
     status, detail = classify(html)
-    return Result(status, detail, html)
+    return Result(status, detail, stored_raw(html))
