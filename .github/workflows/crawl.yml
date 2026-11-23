@@ -87,7 +87,7 @@ jobs:
         run: |
           districts="${DISTRICTS:-}"
           if [ -z "$districts" ] && [ "$PROVIDER" = "tng" ]; then
-            districts="Berkersheim,Eckenheim,Eschersheim,Ginnheim,Heddernheim,Preungesheim,Seckbach,Frankfurter Berg"
+            districts="Berkersheim,Eckenheim,Eschersheim,Ginnheim,Heddernheim,Preungesheim,Seckbach,Frankfurter Berg,Bornheim,Nordend-Ost"
           fi
           args=(--provider "$PROVIDER" --budget-minutes "$BUDGET" --flush-rows 100)
           if [ -n "$districts" ]; then args+=(--districts "$districts"); fi
