@@ -38,7 +38,7 @@ def main(addrs: list[str]) -> None:
             continue
         tng.pace()
         try:
-            html, err = tng.fetch_result_html(street, number, plz, debug_dir=OUT, debug_name=f"tng_{slug(street, number)}")
+            html, err = tng.fetch_result_html(street, number, plz)
         except Exception as exc:  # noqa: BLE001
             print(f"{entry}: error playwright:{type(exc).__name__}: {str(exc)[:200]}")
             continue
