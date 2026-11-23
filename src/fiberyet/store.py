@@ -112,11 +112,39 @@ def _git(data_dir: Path, *args: str, check: bool = True) -> subprocess.Completed
     )
 
 
+def _merge_jsonl(local_path: Path, remote_text: str) -> None:
+    """Merge remote JSONL into local: union of rows, matched by (id, provider)."""
+    local_rows: dict[tuple, dict] = {}
+    for line in local_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        obj = json.loads(line)
+        local_rows[(obj.get("id"), obj.get("provider", ""))] = obj
+    remote_rows: dict[tuple, dict] = {}
+    for line in remote_text.splitlines():
+        if not line.strip():
+            continue
+        obj = json.loads(line)
+        remote_rows[(obj.get("id"), obj.get("provider", ""))] = obj
+    # Union: for rows in both, keep the one with the later measured_at.
+    merged = dict(remote_rows)
+    for key, local_obj in local_rows.items():
+        if key not in merged:
+            merged[key] = local_obj
+        else:
+            remote_t = merged[key].get("t", "")
+            local_t = local_obj.get("t", "")
+            if local_t >= remote_t:
+                merged[key] = local_obj
+    lines = [json.dumps(v, ensure_ascii=False, separators=(",", ":")) for v in sorted(merged.values(), key=lambda x: x.get("id", ""))]
+    local_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
 def push(data_dir: Path, message: str) -> bool:
     """Commit only data_dir and push the current branch, rebasing on conflict.
 
-    False when data_dir has nothing new. Other changes in the repository are left alone: the path
-    argument limits both the staging and the commit, and the pull rebases with autostash.
+    On rebase conflict, merges JSONL files by taking the union of rows (remote + local),
+    so concurrent crawls for different providers or different address sets don't lose work.
     """
     _git(data_dir, "add", "-A", "--", ".")
     if _git(data_dir, "diff", "--cached", "--quiet", "--", ".", check=False).returncode == 0:
@@ -126,6 +154,21 @@ def push(data_dir: Path, message: str) -> bool:
     for _ in range(PUSH_ATTEMPTS):
         if _git(data_dir, "push", "origin", f"HEAD:{branch}", check=False).returncode == 0:
             return True
-        if _git(data_dir, "pull", "--rebase", "--autostash", "origin", branch, check=False).returncode != 0:
+        # Pull failed or push failed: try rebase.
+        pull = _git(data_dir, "pull", "--rebase", "--autostash", "origin", branch, check=False)
+        if pull.returncode != 0:
+            # Rebase conflict: resolve by merging JSONL files.
             _git(data_dir, "rebase", "--abort", check=False)
+            # Fetch remote and merge manually.
+            _git(data_dir, "fetch", "origin", branch, check=False)
+            # For each JSONL file, merge remote into local.
+            meas_dir = data_dir / "measurements"
+            if meas_dir.exists():
+                for local_path in meas_dir.glob("*.jsonl"):
+                    rel = local_path.relative_to(data_dir)
+                    remote = _git(data_dir, "show", f"origin/{branch}:{rel.as_posix()}", check=False)
+                    if remote.returncode == 0:
+                        _merge_jsonl(local_path, remote.stdout)
+            _git(data_dir, "add", "-A", "--", ".")
+            _git(data_dir, "commit", "-m", message, "--", ".", check=False)
     raise RuntimeError("push still failing after retries")
