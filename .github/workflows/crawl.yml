@@ -31,7 +31,8 @@ jobs:
           BUDGET: ${{ inputs.budget_minutes }}
         run: |
           case "${PROVIDER:-all}" in
-            all|telekom) providers='["telekom"]' ;;
+            all) providers='["telekom","einsundeins","tng"]' ;;
+            telekom|einsundeins|tng) providers='["'"$PROVIDER"'"]' ;;
             *) echo "unknown provider" >&2; exit 1 ;;
           esac
           budget="${BUDGET:-45}"

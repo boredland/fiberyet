@@ -59,7 +59,7 @@ def test_progress_is_flushed_to_disk_every_n_rows_without_pushing(tmp_path):
 
     store.save = spying_save
     try:
-        def measure(street, number):
+        def measure(street, number, plz):
             clock.tick()
             return ANSWER
 
@@ -87,7 +87,7 @@ def test_one_commit_per_slice_with_stats_in_the_message(tmp_path):
     con = store.load(data, tmp_path / "w.sqlite")
     clock = StepClock()
 
-    def measure(street, number):
+    def measure(street, number, plz):
         clock.tick()
         return ANSWER
 
@@ -118,7 +118,7 @@ def test_nothing_measured_pushes_nothing(tmp_path):
     git(repo, "commit", "-q", "-m", "state")
     git(repo, "push", "-q", "origin", "main")
     con = store.load(data, tmp_path / "w.sqlite")
-    advance.advance(con, data, "p", lambda s, n: ANSWER, budget_s=100, push=True, margin_s=0,
+    advance.advance(con, data, "p", lambda s, n, p: ANSWER, budget_s=100, push=True, margin_s=0,
                     clock=StepClock(), now=lambda: T0, log=lambda m: None)
     log = subprocess.run(["git", "--git-dir", str(remote), "log", "--format=%s", "main"],
                          check=True, capture_output=True, text=True).stdout.splitlines()
@@ -130,7 +130,7 @@ def test_sigterm_finishes_the_row_in_flight_then_stops_and_saves(tmp_path):
     clock = StepClock()
     seen = []
 
-    def measure(street, number):
+    def measure(street, number, plz):
         clock.tick()
         seen.append(1)
         if len(seen) == 7:

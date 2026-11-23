@@ -36,7 +36,7 @@ RETRY_AFTER_DAYS = 30
 # Written to data/ on disk this often, so a killed runner loses at most this many rows.
 FLUSH_EVERY_ROWS = 100
 
-Measure = Callable[[str, str], "object"]
+Measure = Callable[[str, str, str | None], "object"]
 
 
 def utcnow() -> dt.datetime:
@@ -72,7 +72,7 @@ def crawl_pending(
     Returns how many rows ended in each status.
     """
     rows = con.execute(
-        "SELECT m.rowid AS rid, a.street, a.house_number FROM measurement m"
+        "SELECT m.rowid AS rid, a.street, a.house_number, a.plz FROM measurement m"
         " JOIN address a ON a.id = m.address_id WHERE m.provider = ? AND m.status = 'pending'"
         " ORDER BY m.rowid",
         (provider,),
@@ -81,7 +81,7 @@ def crawl_pending(
     for row in rows:
         if should_stop():
             break
-        result = measure(row["street"], row["house_number"])
+        result = measure(row["street"], row["house_number"], row["plz"])
         with con:
             con.execute(
                 "UPDATE measurement SET status = ?, detail = ?, raw = ?, measured_at = ? WHERE rowid = ?",

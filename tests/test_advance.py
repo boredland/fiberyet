@@ -32,7 +32,7 @@ def world(tmp_path, n=2500):
 
 def fiber_if_left(con):
     x = {r["street"] + r["house_number"]: r["x"] for r in con.execute("SELECT street, house_number, x FROM address")}
-    return lambda street, number: SimpleNamespace(
+    return lambda street, number, plz: SimpleNamespace(
         status="yes" if x[street + number] < 700 else "no", detail="d", raw="BODY"
     )
 
@@ -49,9 +49,9 @@ def run(con, tmp_path, measure, **kw):
 
 
 def counting(measure, clock):
-    def wrapped(street, number):
+    def wrapped(street, number, plz):
         clock.tick()
-        return measure(street, number)
+        return measure(street, number, plz)
 
     return wrapped
 
@@ -59,7 +59,7 @@ def counting(measure, clock):
 def test_slice_runs_holdout_then_coarse_then_refine_and_saves(tmp_path):
     con = world(tmp_path)
     clock = Clock()
-    code, logs = run(con, tmp_path, counting(lambda s, n: SimpleNamespace(status="yes", detail="d", raw="B"), clock),
+    code, logs = run(con, tmp_path, counting(lambda s, n, p: SimpleNamespace(status="yes", detail="d", raw="B"), clock),
                      clock=clock, budget_s=5000)
     assert code == 0
     phases = [l.split("planned ")[1].split(" ")[0] for l in logs if "planned" in l]
@@ -72,7 +72,7 @@ def test_slice_runs_holdout_then_coarse_then_refine_and_saves(tmp_path):
 def test_budget_stops_midway_leaving_pending_saved(tmp_path):
     con = world(tmp_path)
     clock = Clock()
-    code, logs = run(con, tmp_path, counting(lambda s, n: SimpleNamespace(status="yes", detail="d", raw="B"), clock),
+    code, logs = run(con, tmp_path, counting(lambda s, n, p: SimpleNamespace(status="yes", detail="d", raw="B"), clock),
                      clock=clock, budget_s=0.05 * 60 + 40)
     assert code == 0
     saved = (tmp_path / "measurements" / "p.jsonl").read_text().splitlines()
@@ -84,13 +84,13 @@ def test_budget_stops_midway_leaving_pending_saved(tmp_path):
 def test_resumes_from_saved_pending_rows(tmp_path):
     con = world(tmp_path)
     clock = Clock()
-    m = counting(lambda s, n: SimpleNamespace(status="no", detail="d", raw="B"), clock)
+    m = counting(lambda s, n, p: SimpleNamespace(status="no", detail="d", raw="B"), clock)
     run(con, tmp_path, m, clock=clock, budget_s=100)
     first = sum(1 for l in (tmp_path / "measurements" / "p.jsonl").read_text().splitlines()
                 if json.loads(l)["status"] == "no")
     con2 = store.load(tmp_path, tmp_path / "w2.sqlite")
     clock2 = Clock()
-    run(con2, tmp_path, counting(lambda s, n: SimpleNamespace(status="no", detail="d", raw="B"), clock2),
+    run(con2, tmp_path, counting(lambda s, n, p: SimpleNamespace(status="no", detail="d", raw="B"), clock2),
         clock=clock2, budget_s=100)
     total = sum(1 for l in (tmp_path / "measurements" / "p.jsonl").read_text().splitlines()
                 if json.loads(l)["status"] == "no")
@@ -98,7 +98,7 @@ def test_resumes_from_saved_pending_rows(tmp_path):
 
 
 def blocker(status):
-    def measure(street, number):
+    def measure(street, number, plz):
         raise Blocked(status)
 
     return measure
@@ -114,7 +114,7 @@ def test_block_stops_pauses_for_24h_and_next_run_makes_no_request(tmp_path):
     assert state["disabled"] is False and state["streak"] == 1
 
     calls = []
-    code, logs = run(con, tmp_path, lambda s, n: calls.append(1))
+    code, logs = run(con, tmp_path, lambda s, n, p: calls.append(1))
     assert code == 0 and calls == [] and "paused until" in logs[0]
 
 
@@ -140,7 +140,7 @@ def test_a_clean_slice_resets_the_streak(tmp_path):
     later = T0 + dt.timedelta(hours=25)
     clock = Clock()
     code = advance.advance(
-        con, tmp_path, "p", counting(lambda s, n: SimpleNamespace(status="yes", detail="d", raw="B"), clock),
+        con, tmp_path, "p", counting(lambda s, n, p: SimpleNamespace(status="yes", detail="d", raw="B"), clock),
         budget_s=200, checkpoint_s=10_000, push=False, margin_s=0, clock=clock, now=lambda: later,
         log=lambda m: None,
     )
@@ -162,7 +162,7 @@ def test_a_hand_set_disabled_flag_still_stops_the_provider(tmp_path):
     (tmp_path / "state" / "p.json").write_text(json.dumps(
         {"blocks": [], "streak": 0, "pause_until": None, "pause_s": None, "disabled": True}))
     calls = []
-    code, logs = run(con, tmp_path, lambda s, n: calls.append(1))
+    code, logs = run(con, tmp_path, lambda s, n, p: calls.append(1))
     assert code == 0 and calls == [] and "disabled" in logs[0]
 
 
@@ -183,7 +183,7 @@ def test_blocked_status_zero_for_non_json_is_recorded(tmp_path):
 def test_unavailable_exits_zero_without_recording_a_block(tmp_path):
     con = world(tmp_path)
 
-    def down(street, number):
+    def down(street, number, plz):
         raise Unavailable("x")
 
     code, logs = run(con, tmp_path, down)
@@ -194,7 +194,7 @@ def test_unavailable_exits_zero_without_recording_a_block(tmp_path):
 def test_logs_never_contain_addresses_or_urls(tmp_path):
     con = world(tmp_path)
     clock = Clock()
-    _, logs = run(con, tmp_path, counting(lambda s, n: SimpleNamespace(status="yes", detail="d", raw="B"), clock),
+    _, logs = run(con, tmp_path, counting(lambda s, n, p: SimpleNamespace(status="yes", detail="d", raw="B"), clock),
                   clock=clock, budget_s=300)
     text = "\n".join(logs)
     assert "://" not in text and "Gärtner" not in text and "id0" not in text
@@ -230,7 +230,7 @@ def test_rows_measured_today_use_up_the_daily_quota(tmp_path, monkeypatch):
 def test_idle_when_everything_is_fresh_and_nothing_to_plan(tmp_path):
     con = world(tmp_path, n=1100)
     clock = Clock()
-    m = counting(lambda s, n: SimpleNamespace(status="yes", detail="d", raw="B"), clock)
+    m = counting(lambda s, n, p: SimpleNamespace(status="yes", detail="d", raw="B"), clock)
     code, logs = run(con, tmp_path, m, clock=clock, budget_s=10**7)
     assert code == 0
     assert any("planned idle" in l for l in logs)

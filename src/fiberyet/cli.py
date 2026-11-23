@@ -8,7 +8,7 @@ from pathlib import Path
 from . import db
 from .fetch import Blocked, Fetcher, ProxyConfigError, proxy_transport_from_env
 
-PROVIDERS = ("telekom",)
+PROVIDERS = ("telekom", "einsundeins", "tng")
 
 
 def _districts(value: str | None) -> list[str] | None:
@@ -23,7 +23,15 @@ def measure_with(provider: str, fetcher: Fetcher):
     if provider == "telekom":
         from .providers import telekom
 
-        return lambda street, number: telekom.measure(fetcher, street, number)
+        return lambda street, number, plz: telekom.measure(fetcher, street, number)
+    if provider == "einsundeins":
+        from .providers import einsundeins
+
+        return lambda street, number, plz: einsundeins.measure(fetcher, street, number, plz)
+    if provider == "tng":
+        from .providers import tng
+
+        return lambda street, number, plz: tng.measure(fetcher, street, number, plz)
     raise SystemExit(f"unknown provider {provider}")
 
 

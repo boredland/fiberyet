@@ -72,7 +72,7 @@ def classify(hpac: dict) -> tuple[str, str]:
     return ("yes" if fiber else "no"), detail
 
 
-def measure(fetcher: Fetcher, street: str, house_number: str) -> Result:
+def measure(fetcher: Fetcher, street: str, house_number: str, plz: str | None = None) -> Result:
     try:
         search_resp = fetcher.get(
             BASE + "search/", params={"type": "address", "q": f"{street} {house_number}, {CITY}"}
