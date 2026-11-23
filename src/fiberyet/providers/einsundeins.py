@@ -85,13 +85,18 @@ def measure(fetcher: Fetcher, street: str, house_number: str, plz: str | None) -
 
     # Fetch the result page and read the subheading class.
     page = fetcher.get(RESULT_URL)
-    html = page.text
+    status, detail = classify(page.text)
+    return Result(status, detail, page.text[:2000])
+
+
+def classify(html: str) -> tuple[str, str]:
+    """(status, detail) from the result page: the class of the first div inside the subheading."""
     m = re.search(r'<div class="[^"]*v-check__subheading[^"]*"[^>]*>\s*<div class="([\w-]+)"', html)
     if not m:
-        return Result("error", "no-subheading", html[:2000])
+        return "error", "no-subheading"
     cls = m.group(1)
     if cls == "gf-vvm":
-        return Result("yes", cls, html[:2000])
+        return "yes", cls
     if cls == "dsl-only-in-gf":
-        return Result("no", cls, html[:2000])
-    return Result("error", f"unknown:{cls}", html[:2000])
+        return "no", cls
+    return "error", f"unknown:{cls}"

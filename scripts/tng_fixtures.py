@@ -11,7 +11,7 @@ import re
 import sys
 from pathlib import Path
 
-from fiberyet import db
+from fiberyet import store
 from fiberyet.providers import tng
 
 OUT = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
@@ -23,7 +23,7 @@ def slug(street: str, number: str) -> str:
 
 
 def main(addrs: list[str]) -> None:
-    con = db.connect()
+    con = store.load(Path("data"))
     OUT.mkdir(parents=True, exist_ok=True)
     for entry in addrs:
         street, _, number = entry.partition(",")
