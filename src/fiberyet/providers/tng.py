@@ -138,22 +138,17 @@ def fetch_result_html(
                 except Exception:  # noqa: BLE001
                     pass
 
-                # Capture the submit response (Next.js server action).
+                # Submit; TNG answers via a Next.js server action (POST).
                 try:
-                    with page.expect_response(lambda r: r.request.method == "POST", timeout=15000) as resp_info:
+                    with page.expect_response(lambda r: r.request.method == "POST", timeout=15000):
                         page.click('button[type="submit"]')
-                    resp = resp_info.value
-                    print(f"TNG DEBUG post={resp.url} status={resp.status} body={resp.text()[:400]}", flush=True)
-                except Exception as exc:  # noqa: BLE001
-                    print(f"TNG DEBUG post_err={type(exc).__name__}:{str(exc)[:200]}", flush=True)
+                except Exception:  # noqa: BLE001 - click anyway if no POST observed
                     page.click('button[type="submit"]')
                 page.wait_for_load_state("domcontentloaded", timeout=15000)
                 try:
                     page.wait_for_load_state("networkidle", timeout=10000)
                 except Exception:  # noqa: BLE001
                     pass
-                body_debug = page.locator("body").inner_text()
-                print(f"TNG DEBUG url={page.url} title={page.title()} content_len={len(page.content())} body={body_debug[:1500]}", flush=True)
                 html = page.content()
                 return html, None
             finally:
@@ -163,13 +158,25 @@ def fetch_result_html(
 
 
 def classify(html: str) -> tuple[str, str]:
-    low = html.casefold()
-    if "adresse nicht gefunden" in low or "adresse nicht eindeutig" in low or "keine adresse" in low:
+    """Classify a captured TNG result page.
+
+    Yes: the tariff page (`/wunschtarif`) with "Tarif für Sie verfügbar" and
+    occupancy selection ("Was trifft auf Sie zu?").
+    No: the availability form re-rendered ("Prüfen Sie die Verfügbarkeit an Ihrer
+    Anschlussadresse") after submit — no product offered.
+    """
+    import re
+
+    # Next.js embeds error-message templates in every page's JS config; strip scripts.
+    visible = re.sub(r"<script.*?</script>", " ", html, flags=re.S | re.I)
+    visible = re.sub(r"<style.*?</style>", " ", visible, flags=re.S | re.I)
+    low = re.sub(r"<[^>]+>", " ", visible).casefold()
+    if "die adresse ist uns leider nicht bekannt" in low or "adresse nicht eindeutig" in low:
         return "unmatched", "address-error"
-    if "interesse" in low and ("anmeld" in low or "registrier" in low or "vormerk" in low):
-        return "no", "interest"
-    if "bestellen" in low or "in den warenkorb" in low or "jetzt beauftragen" in low or ("verfügbar" in low and "glasfaser" in low):
-        return "yes", "order"
+    if "tarif für sie verfügbar" in low and "was trifft auf sie zu" in low:
+        return "yes", "tariff-offered"
+    if "prüfen sie die verfügbarkeit an ihrer anschlussadresse" in low:
+        return "no", "no-tariff"
     return "error", "unclassified"
 
 
