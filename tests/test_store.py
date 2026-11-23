@@ -55,7 +55,7 @@ def test_measurement_roundtrip_is_sorted_compact_and_byte_stable(tmp_path):
     assert [r["id"] for r in rows] == ["id00001", "id00002", "id00003"]
     assert "raw" in rows[0] and rows[0]["status"] == "unmatched"
     assert rows[1] == {"id": "id00002", "stage": "refine", "status": "pending"}
-    assert "raw" not in rows[2] and rows[2]["detail"] == "AVAILABLE_FIBER"
+    assert "raw" in rows[2] and rows[2]["detail"] == "AVAILABLE_FIBER"
     assert b" " not in first.split(b"\n")[2]
 
     store.save(con, tmp_path, "telekom")
@@ -63,7 +63,7 @@ def test_measurement_roundtrip_is_sorted_compact_and_byte_stable(tmp_path):
 
     again = store.load(tmp_path, tmp_path / "w2.sqlite")
     got = {r["address_id"]: dict(r) for r in again.execute("SELECT * FROM measurement")}
-    assert got["id00003"]["status"] == "yes" and got["id00003"]["raw"] is None
+    assert got["id00003"]["status"] == "yes" and got["id00003"]["raw"] == "BODY"
     assert got["id00001"]["raw"] == "SEARCH"
     assert got["id00002"]["measured_at"] is None
 

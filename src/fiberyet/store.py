@@ -9,13 +9,12 @@ import csv
 import gzip
 import io
 import json
-import math
 import os
 import sqlite3
 import subprocess
 from pathlib import Path
 
-from . import db, sampling
+from . import db
 
 FRAME_COLUMNS = ("id", "street", "house_number", "plz", "district", "x", "y", "lon", "lat")
 BOT = ("github-actions[bot]", "github-actions[bot]@users.noreply.github.com")
@@ -37,28 +36,23 @@ def save_frame(con: sqlite3.Connection, data_dir: Path, version: str) -> None:
 
 def load(data_dir: Path, db_path: Path = db.DB_PATH) -> sqlite3.Connection:
     """Fresh work database from the data branch files. The hold-out is re-derived, never stored."""
+    from . import sampling
+
     if db_path.exists():
         db_path.unlink()
     con = db.connect(db_path)
-    frame = data_dir / "frame" / "addresses.csv.gz"
-    if not frame.exists():
+    frame_dir = data_dir / "frame"
+    if not (frame_dir / "addresses.csv.gz").exists():
         raise SystemExit("no frame in data dir; run `fiberyet frame --data-dir ...` first")
-    with gzip.open(frame, "rt", encoding="utf-8", newline="") as fh:
+    with gzip.open(frame_dir / "addresses.csv.gz", "rt", encoding="utf-8", newline="") as fh:
         rows = []
         for r in csv.DictReader(fh):
             x, y = float(r["x"]), float(r["y"])
             rows.append(
                 (
-                    r["id"],
-                    r["street"],
-                    r["house_number"],
-                    r["plz"] or None,
-                    r["district"] or None,
-                    x,
-                    y,
-                    float(r["lon"]),
-                    float(r["lat"]),
-                    f"{math.floor(x / 100)}_{math.floor(y / 100)}",
+                    r["id"], r["street"], r["house_number"], r["plz"] or None,
+                    r["district"] or None, x, y, float(r["lon"]), float(r["lat"]),
+                    f"{int(x // 100)}_{int(y // 100)}",
                 )
             )
     with con:
@@ -68,19 +62,23 @@ def load(data_dir: Path, db_path: Path = db.DB_PATH) -> sqlite3.Connection:
             rows,
         )
     sampling.mark_holdout(con)
-    for path in sorted((data_dir / "measurements").glob("*.jsonl")):
-        provider = path.stem
-        with open(path, encoding="utf-8") as fh:
-            items = [json.loads(line) for line in fh if line.strip()]
-        with con:
-            con.executemany(
-                "INSERT INTO measurement (address_id, provider, stage, status, detail, raw, measured_at)"
-                " VALUES (?,?,?,?,?,?,?)",
-                [
-                    (i["id"], provider, i["stage"], i["status"], i.get("detail"), i.get("raw"), i.get("t"))
-                    for i in items
-                ],
-            )
+    meas_dir = data_dir / "measurements"
+    if meas_dir.exists():
+        for path in sorted(meas_dir.glob("*.jsonl")):
+            provider = path.stem
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                item = json.loads(line)
+                con.execute(
+                    "INSERT OR REPLACE INTO measurement (address_id, provider, stage, status, detail, raw, measured_at) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (
+                        item["id"], provider, item["stage"], item["status"],
+                        item.get("detail"), item.get("raw"), item.get("t"),
+                    ),
+                )
+    con.commit()
     return con
 
 
@@ -94,7 +92,7 @@ def save(con: sqlite3.Connection, data_dir: Path, provider: str) -> None:
             item["detail"] = r["detail"]
         if r["measured_at"] is not None:
             item["t"] = r["measured_at"]
-        if r["status"] in ("error", "unmatched") and r["raw"] is not None:
+        if r["raw"] is not None:
             item["raw"] = r["raw"]
         lines.append(json.dumps(item, ensure_ascii=False, separators=(",", ":")))
     tmp = out / f".{provider}.jsonl.tmp"
@@ -112,39 +110,52 @@ def _git(data_dir: Path, *args: str, check: bool = True) -> subprocess.Completed
     )
 
 
-def _merge_jsonl(local_path: Path, remote_text: str) -> None:
-    """Merge remote JSONL into local: union of rows, matched by (id, provider)."""
-    local_rows: dict[tuple, dict] = {}
-    for line in local_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        obj = json.loads(line)
-        local_rows[(obj.get("id"), obj.get("provider", ""))] = obj
-    remote_rows: dict[tuple, dict] = {}
-    for line in remote_text.splitlines():
-        if not line.strip():
-            continue
-        obj = json.loads(line)
-        remote_rows[(obj.get("id"), obj.get("provider", ""))] = obj
-    # Union: for rows in both, keep the one with the later measured_at.
-    merged = dict(remote_rows)
-    for key, local_obj in local_rows.items():
-        if key not in merged:
-            merged[key] = local_obj
-        else:
-            remote_t = merged[key].get("t", "")
-            local_t = local_obj.get("t", "")
-            if local_t >= remote_t:
+def _merge_jsonl(local_path: Path, local_text: str, remote_text: str) -> None:
+    """Merge remote JSONL into the file at local_path: union of rows, matched by (id, provider).
+
+    For rows present in both, keeps the one with the later measured_at (t).
+    Falls back to line-based union for non-JSON content.
+    """
+    local_lines = [ln for ln in local_text.splitlines() if ln.strip()]
+    remote_lines = [ln for ln in remote_text.splitlines() if ln.strip()]
+    try:
+        local_rows: dict[tuple, dict] = {}
+        for line in local_lines:
+            obj = json.loads(line)
+            local_rows[(obj.get("id"), obj.get("provider", ""))] = obj
+        remote_rows: dict[tuple, dict] = {}
+        for line in remote_lines:
+            obj = json.loads(line)
+            remote_rows[(obj.get("id"), obj.get("provider", ""))] = obj
+        merged = dict(remote_rows)
+        for key, local_obj in local_rows.items():
+            if key not in merged:
                 merged[key] = local_obj
-    lines = [json.dumps(v, ensure_ascii=False, separators=(",", ":")) for v in sorted(merged.values(), key=lambda x: x.get("id", ""))]
-    local_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+            else:
+                remote_t = merged[key].get("t", "")
+                local_t = local_obj.get("t", "")
+                if local_t >= remote_t:
+                    merged[key] = local_obj
+        lines = [json.dumps(v, ensure_ascii=False, separators=(",", ":")) for v in sorted(merged.values(), key=lambda x: x.get("id", ""))]
+        local_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        return
+    except (json.JSONDecodeError, KeyError, TypeError):
+        pass
+    seen: set[str] = set()
+    out: list[str] = []
+    for line in remote_lines + local_lines:
+        if line not in seen:
+            seen.add(line)
+            out.append(line)
+    local_path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
 
 
 def push(data_dir: Path, message: str) -> bool:
-    """Commit only data_dir and push the current branch, rebasing on conflict.
+    """Commit only data_dir and push the current branch.
 
-    On rebase conflict, merges JSONL files by taking the union of rows (remote + local),
-    so concurrent crawls for different providers or different address sets don't lose work.
+    On push failure (e.g. concurrent crawl), fetches remote, resets to it, merges
+    local file changes on top, re-commits and pushes. Stashes uncommitted changes
+    outside data_dir (e.g. README edits) so they survive the reset.
     """
     _git(data_dir, "add", "-A", "--", ".")
     if _git(data_dir, "diff", "--cached", "--quiet", "--", ".", check=False).returncode == 0:
@@ -154,21 +165,31 @@ def push(data_dir: Path, message: str) -> bool:
     for _ in range(PUSH_ATTEMPTS):
         if _git(data_dir, "push", "origin", f"HEAD:{branch}", check=False).returncode == 0:
             return True
-        # Pull failed or push failed: try rebase.
-        pull = _git(data_dir, "pull", "--rebase", "--autostash", "origin", branch, check=False)
-        if pull.returncode != 0:
-            # Rebase conflict: resolve by merging JSONL files.
-            _git(data_dir, "rebase", "--abort", check=False)
-            # Fetch remote and merge manually.
-            _git(data_dir, "fetch", "origin", branch, check=False)
-            # For each JSONL file, merge remote into local.
-            meas_dir = data_dir / "measurements"
-            if meas_dir.exists():
-                for local_path in meas_dir.glob("*.jsonl"):
-                    rel = local_path.relative_to(data_dir)
-                    remote = _git(data_dir, "show", f"origin/{branch}:{rel.as_posix()}", check=False)
-                    if remote.returncode == 0:
-                        _merge_jsonl(local_path, remote.stdout)
-            _git(data_dir, "add", "-A", "--", ".")
+        # Push failed: stash, fetch remote, reset, merge, re-commit, push, unstash.
+        _git(data_dir, "stash", "push", "--include-untracked", "-m", "push-stash", check=False)
+        _git(data_dir, "fetch", "origin", branch, check=False)
+        # Save ALL local files before reset.
+        local_files: dict[str, str] = {}
+        for fpath in data_dir.rglob("*"):
+            if fpath.is_file():
+                rel = fpath.relative_to(data_dir).as_posix()
+                local_files[rel] = fpath.read_text(encoding="utf-8")
+        # Reset to remote (discards local commit, but we saved file contents).
+        _git(data_dir, "reset", "--hard", f"origin/{branch}", check=False)
+        # Merge: for JSONL files, union rows; for other files, restore if missing.
+        for rel, local_text in local_files.items():
+            local_path = data_dir / rel
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            if rel.endswith(".jsonl"):
+                remote_text = ""
+                if local_path.exists():
+                    remote_text = local_path.read_text(encoding="utf-8")
+                _merge_jsonl(local_path, local_text, remote_text)
+            elif not local_path.exists():
+                local_path.write_text(local_text, encoding="utf-8")
+        _git(data_dir, "add", "-A", "--", ".")
+        if _git(data_dir, "diff", "--cached", "--quiet", "--", ".", check=False).returncode != 0:
             _git(data_dir, "commit", "-m", message, "--", ".", check=False)
+        # Restore stashed changes.
+        _git(data_dir, "stash", "pop", check=False)
     raise RuntimeError("push still failing after retries")
