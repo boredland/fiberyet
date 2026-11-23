@@ -75,6 +75,13 @@ def fetch_result_html(
                 page.goto(BASE, wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_selector('input[name="zip-and-city"]', timeout=15000)
                 dump(page, "0_loaded")
+                # Cookiebot consent banner blocks focus/typing; accept it.
+                try:
+                    page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll', timeout=5000)
+                    page.wait_for_selector('#CybotCookiebotDialog', state='hidden', timeout=5000)
+                except Exception:  # noqa: BLE001 - no banner or already accepted
+                    pass
+                dump(page, "0b_after_consent")
 
                 # New customer
                 page.locator('input[name="customer-type"][value="new"]').check()
