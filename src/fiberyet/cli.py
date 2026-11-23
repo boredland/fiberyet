@@ -82,14 +82,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_probe(args) -> None:
+def run_probe(args, con) -> None:
     try:
         fetcher = make_fetcher(args.provider)
     except ProxyConfigError as exc:
         print(exc, file=sys.stderr)
         sys.exit(2)
+    row = con.execute(
+        "SELECT plz FROM address WHERE street = ? AND house_number = ?", (args.street, args.number)
+    ).fetchone()
     try:
-        r = measure_with(args.provider, fetcher)(args.street, args.number)
+        r = measure_with(args.provider, fetcher)(args.street, args.number, row["plz"] if row else None)
     except Blocked as exc:
         print(f"{args.provider} BLOCKED status={exc.status}")
         sys.exit(3)
@@ -158,18 +161,19 @@ def main(argv: list[str] | None = None) -> None:
         )
         print(f"{n} addresses")
         return
-    if args.cmd == "probe":
-        run_probe(args)
-        return
-
     from . import store
+
+    con = store.load(args.data_dir)
+
+    if args.cmd == "probe":
+        run_probe(args, con)
+        return
 
     if args.cmd == "save-and-push":
         pushed = store.push(args.data_dir, f"data: {args.provider} final save")
         print("pushed" if pushed else "nothing to push")
         return
 
-    con = store.load(args.data_dir)
     if args.cmd == "advance":
         run_advance(args, con)
     elif args.cmd == "export":

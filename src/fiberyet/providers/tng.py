@@ -32,9 +32,17 @@ def measure(fetcher: Fetcher, street: str, house_number: str, plz: str | None) -
     except ImportError:
         return Result("error", "no-playwright", None)
 
+    # The bundled Chromium needs system libraries; the distro's chromium package has its own.
+    import shutil
+
+    system_chromium = shutil.which("chromium") or shutil.which("chromium-browser")
+
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            launch = {"headless": True}
+            if system_chromium:
+                launch["executable_path"] = system_chromium
+            browser = p.chromium.launch(**launch)
             page = browser.new_page()
             page.goto(BASE, wait_until="networkidle", timeout=30000)
 

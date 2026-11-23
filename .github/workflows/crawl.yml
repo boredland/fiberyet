@@ -72,6 +72,9 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen
+      - name: Install Playwright browser (tng drives a real browser)
+        if: matrix.provider == 'tng'
+        run: uv run playwright install --with-deps chromium
       - name: Crawl one slice
         run: uv run fiberyet advance --provider "$PROVIDER" --budget-minutes "$BUDGET" --flush-rows 100
       # advance commits and pushes once, at the end, with the counts in the message. This step only
