@@ -1,0 +1,42 @@
+# Captures TNG availability result pages as test fixtures (plan step 7: classify by real pages
+# before any measurement run records a yes/no). Commits tests/fixtures/tng_*.html to main.
+name: fixtures
+run-name: fixtures · TNG result pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      addresses:
+        description: "semicolon-separated Street,Number pairs"
+        default: "Alt-Heddernheim,30;Römerberg,23"
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      ADDRESSES: ${{ inputs.addresses }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run playwright install --with-deps chromium
+      - name: Capture result pages
+        run: |
+          IFS=';' read -ra pairs <<< "$ADDRESSES"
+          uv run python scripts/tng_fixtures.py "${pairs[@]}"
+      - name: Commit captured fixtures
+        run: |
+          git config user.name boredland
+          git config user.email boredland@users.noreply.github.com
+          git add tests/fixtures
+          if git diff --cached --quiet; then
+            echo "no new fixtures"
+          else
+            git commit -m "fixtures: TNG result pages for ${ADDRESSES}"
+            git pull --rebase origin main
+            git push origin main
+          fi
