@@ -44,6 +44,12 @@ def test_dsl_16_only_is_no():
     html = GALLERY % ("dsl-16-only-in-gf", "In 65929 Frankfurt am Main, Hochmuhl 5 ist ein 1&1 Glasfaser-Direktanschluss derzeit noch nicht verfügbar.")
     assert einsundeins.classify(html) == ("no", "dsl-16-only-in-gf")
 
+
+
+def test_hotline_only_is_no():
+    html = '<div class="section-headline__subline">In 60486 Frankfurt am Main, Voltastr. 79 a ist 1&1 DSL oder Glasfaser aktuell nur über unsere Bestell-Hotline verfügbar.</div>'
+    assert einsundeins.classify(html) == ("no", "hotline-only")
+
 def test_missing_plz_never_requests():
     f = Fetcher()
     try:

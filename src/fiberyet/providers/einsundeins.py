@@ -93,6 +93,10 @@ def classify(html: str) -> tuple[str, str]:
     """(status, detail) from the result page: the class of the first div inside the subheading."""
     m = re.search(r'<div class="[^"]*v-check__subheading[^"]*"[^>]*>\s*<div class="([\w-]+)"', html)
     if not m:
+        # Some addresses get a plain-text subline: fiber is only orderable by phone.
+        hot = re.search(r'<div class="section-headline__subline[^"]*"[^>]*>(.*?)</div>', html, re.S)
+        if hot and "bestell-hotline" in hot.group(1).casefold():
+            return "no", "hotline-only"
         return "error", "no-subheading"
     cls = m.group(1)
     if cls in ("gf-vvm", "gf-only"):
@@ -108,4 +112,7 @@ def subheading_html(html: str) -> str:
         r'<div class="[^"]*v-check__subheading[^"]*"[^>]*>\s*(<div class="[\w-]+">.*?</div>)',
         html, re.S,
     )
-    return m.group(1)[:2000] if m else html[:2000]
+    if m:
+        return m.group(1)[:2000]
+    hot = re.search(r'(<div class="section-headline__subline[^"]*"[^>]*>.*?</div>)', html, re.S)
+    return hot.group(1)[:2000] if hot else html[:2000]
