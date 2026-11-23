@@ -10,7 +10,6 @@ address, a URL or a response body.
 """
 
 from __future__ import annotations
-
 import contextlib
 import datetime as dt
 import json
@@ -74,7 +73,7 @@ def crawl_pending(
     rows = con.execute(
         "SELECT m.rowid AS rid, a.street, a.house_number, a.plz FROM measurement m"
         " JOIN address a ON a.id = m.address_id WHERE m.provider = ? AND m.status = 'pending'"
-        " ORDER BY m.rowid",
+        " ORDER BY CASE m.stage WHEN 'holdout' THEN 0 WHEN 'coarse' THEN 1 WHEN 'refine' THEN 2 ELSE 3 END, m.rowid",
         (provider,),
     ).fetchall()
     done: Counter = Counter()
