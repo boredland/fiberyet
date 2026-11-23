@@ -79,7 +79,10 @@ def fetch_result_html(
                 inp.click()
                 inp.press_sequentially(plz, delay=80)
                 page.wait_for_timeout(8000)
-                page.wait_for_selector('[role="option"]', timeout=15000)
+                try:
+                    page.wait_for_selector('[role="option"]', timeout=15000)
+                except Exception:  # noqa: BLE001 - no suggestion means outside TNG's footprint
+                    return None, "no-plz-suggestion"
                 opts = page.locator('[role="option"]')
                 picked = False
                 for i in range(opts.count()):
@@ -98,7 +101,10 @@ def fetch_result_html(
                 page.wait_for_selector('input[name="street"]:not([disabled])', timeout=10000)
                 page.locator('input[name="street"]').press_sequentially(street, delay=50)
                 page.wait_for_timeout(3000)
-                page.wait_for_selector('[role="option"]', timeout=15000)
+                try:
+                    page.wait_for_selector('[role="option"]', timeout=15000)
+                except Exception:  # noqa: BLE001 - no street suggestion for this address
+                    return None, "no-street-suggestion"
 
                 picked = False
                 lb = page.locator('[role="listbox"]')
