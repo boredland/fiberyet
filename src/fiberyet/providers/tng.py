@@ -129,10 +129,10 @@ def fetch_result_html(
                 # House number
                 page.wait_for_selector('input[name="housenumber"]:not([disabled])', timeout=10000)
                 page.locator('input[name="housenumber"]').press_sequentially(house_number, delay=50)
+                picked = False
                 try:
                     page.wait_for_selector('[role="option"]', timeout=10000)
                     opts = page.locator('[role="option"]')
-                    picked = False
                     for i in range(opts.count()):
                         text = opts.nth(i).inner_text()
                         if house_number in text:
@@ -142,8 +142,12 @@ def fetch_result_html(
                     if not picked and opts.count():
                         opts.first.click()
                         picked = True
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001 - no option for this number
                     pass
+                if not picked:
+                    # Without a selected option the submit stays disabled: fail fast
+                    # as unmatched instead of burning 30 s and recording an error.
+                    return None, "no-number-pick"
 
                 # Submit; TNG answers via a Next.js server action (POST).
                 try:
