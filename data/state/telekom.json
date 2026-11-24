@@ -9,7 +9,8 @@
    "status": 403
   }
  ],
- "disabled": false,
+ "disabled": true,
+ "disabled_reason": "second 403 on 2026-11-24; plan ends automated measurement after a second block",
  "pause_s": 10.0,
  "pause_until": "2026-11-25T09:09:22Z",
  "streak": 1
