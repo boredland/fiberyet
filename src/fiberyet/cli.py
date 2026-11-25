@@ -79,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("export", help="write the published cell and district files")
     p.add_argument("--out", type=Path, default=Path("dist/data"))
+    p.add_argument("--oxg-check", action="store_true", help="write data/oxg_check.csv for hand entry at OXG's checker; publishes nothing")
+    p.add_argument("--oxg-n", type=int, default=50, help="addresses per group in the OXG sheet")
     return parser
 
 
@@ -127,6 +129,13 @@ def run_advance(args, con) -> None:
 
 
 def run_export(args, con) -> None:
+    if args.oxg_check:
+        from . import oxg_check
+
+        path = args.data_dir / "oxg_check.csv"
+        counts = oxg_check.write(con, path, args.oxg_n)
+        print(f"{path}: {counts}")
+        return
     import json
 
     from . import export, frame, infer
